@@ -13,6 +13,13 @@ jobs:
     permissions:
       contents: write   # needed so this workflow can save the updated database back to the repo
 
+    # All the actual project files live inside the "MP Agent" subfolder in
+    # this repo, not at the root - this tells every step below to run from
+    # inside that folder instead of the repo root.
+    defaults:
+      run:
+        working-directory: "MP Agent"
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -32,12 +39,6 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      # IMPORTANT: GitHub Actions gives you a brand new, empty machine every
-      # single run - nothing persists automatically. Without this step,
-      # seen_listings.db (and the geocode cache inside it) would reset to
-      # empty every 30 minutes, and you'd get re-notified about the same
-      # listings forever. This step saves the updated database file back
-      # into the repository so the next run picks up where this one left off.
       - name: Save updated database back to the repo
         run: |
           git config user.name "github-actions[bot]"
