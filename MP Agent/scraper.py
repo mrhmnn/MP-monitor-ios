@@ -60,6 +60,7 @@ class Listing:
     posted_date: str = ""
     latitude: float = None
     longitude: float = None
+    image_url: str = ""
 
     @property
     def combined_text(self) -> str:
@@ -157,6 +158,32 @@ def _parse_json_blob(html: str) -> list[Listing]:
 
             location = item.get("location", {}) if isinstance(item.get("location"), dict) else {}
 
+            # Extract first image URL. Marktplaats provides multiple size
+            # variants in the `pictures` array; the "large" one is a good
+            # quality/size balance for Telegram (under Telegram's ~5MB
+            # sendPhoto limit while still readable on a phone screen).
+            image_url = ""
+            pictures = item.get("pictures", [])
+            if pictures and isinstance(pictures, list):
+                first_pic = pictures[0]
+                if isinstance(first_pic, dict):
+                    image_url = (
+                        first_pic.get("largeUrl")
+                        or first_pic.get("mediumUrl")
+                        or first_pic.get("extraExtraLargeUrl")
+                        or ""
+                    )
+            # Fallback to imageUrls if pictures didn't yield anything
+            if not image_url:
+                image_urls = item.get("imageUrls", [])
+                if image_urls and isinstance(image_urls, list):
+                    raw = image_urls[0]
+                    # imageUrls entries often start with "//" - add scheme
+                    if raw.startswith("//"):
+                        image_url = "https:" + raw
+                    elif raw.startswith("http"):
+                        image_url = raw
+
             listings.append(
                 Listing(
                     listing_id=str(item.get("itemId", item.get("id", ""))),
@@ -168,6 +195,7 @@ def _parse_json_blob(html: str) -> list[Listing]:
                     posted_date=item.get("date", ""),
                     latitude=location.get("latitude"),
                     longitude=location.get("longitude"),
+                    image_url=image_url,
                 )
             )
         except Exception as exc:  # noqa: BLE001

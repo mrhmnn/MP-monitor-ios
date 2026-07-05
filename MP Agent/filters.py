@@ -16,6 +16,7 @@ Decision flow for a single listing (title + description combined as `text`):
 """
 
 from dataclasses import dataclass
+import re
 from typing import Optional
 
 
@@ -77,19 +78,32 @@ def evaluate_listing(title: str, description: str, config: dict) -> FilterResult
     """
     Main entry point.
 
-    IMPORTANT: model matching (14/15/16) is checked against the TITLE only,
-    not the full description. Sellers reliably state what they're actually
-    selling in the title; checking the description too caused false
-    positives in production - e.g. an iPhone 12 listing whose description
-    incidentally mentioned "I also have an iPhone 14 for sale" would
-    wrongly pass the model filter. Damage/exclusion/noise checks still use
-    the full combined text, since that detail often lives in the description.
+    IMPORTANT: model matching (14/15/16/17) is checked against the TITLE
+    only, not the full description. Sellers reliably state what they're
+    actually selling in the title; checking the description too caused
+    false positives in production - e.g. an iPhone 12 listing whose
+    description incidentally mentioned "I also have an iPhone 14 for sale"
+    would wrongly pass the model filter. Damage/exclusion/noise checks
+    still use the full combined text, since that detail often lives in
+    the description.
+
+    Same title-only rule applies to title_model_excludes (iPhone Air) -
+    only the title determines model identity.
     """
     title_lower = title.lower()
     combined_text = f"{title} {description}".lower()
 
     if not matches_target_model(title_lower, config["target_models"]):
-        return FilterResult(accepted=False, reason="not a target model (14/15/16) in title")
+        return FilterResult(accepted=False, reason="not a target model (14-17) in title")
+
+    # Explicitly reject iPhone Air listings even if the base-model check
+    # passed via substring match. We use word-boundary regex here rather
+    # than plain substring because Apple's naming is "iPhone 17 Air" (with
+    # the generation number in between), so a simple "iphone air"
+    # substring check would miss it. \b ensures we don't accidentally
+    # match "airbag" or similar words.
+    if re.search(r"\biphone\b.*\bair\b", title_lower):
+        return FilterResult(accepted=False, reason="excluded model: iPhone Air variant")
 
     if is_business_listing(
         combined_text,

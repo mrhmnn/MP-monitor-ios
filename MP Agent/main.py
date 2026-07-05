@@ -133,7 +133,7 @@ def run_scan_cycle(config: dict) -> None:
             duration_minutes=match["duration_minutes"],
             posted_date=match["listing"].posted_date,
         )
-        telegram_notifier.send_message(message)
+        telegram_notifier.send_listing(match["listing"].image_url, message)
 
     logger.info(
         "Scan complete. Fetched: %d | New: %d | Matched: %d | Total tracked: %d",

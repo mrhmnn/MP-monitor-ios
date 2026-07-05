@@ -2,11 +2,14 @@
 # Secrets (API keys, tokens) go in .env, NOT here. This file is safe to commit to git.
 
 # --- Search setup ---
-# Each query is run against Marktplaats' search. We deliberately search broad damage
-# phrases (not "iphone 14 scherm kapot" combos) and let the Python filtering logic
-# below decide which model + which damage type actually qualifies. This avoids
-# missing listings just because of how Marktplaats' own search ranks multi-word queries.
+# Marktplaats' search returns 30 listings per query, sorted newest-first.
+# We use a mix of:
+#   - Broad damage-term queries (catch matches across all model generations)
+#   - Model-specific queries (catch fresh listings that would otherwise get
+#     pushed off the newest-30 list by higher-volume broad-term results)
+# The Python filter then decides which model + damage combo actually qualifies.
 search_queries:
+  # Broad damage-phrase queries
   - "iphone scherm kapot"
   - "iphone scherm gebarsten"
   - "iphone scherm defect"
@@ -18,11 +21,29 @@ search_queries:
   - "iphone oplaadprobleem"
   - "iphone mankement"
   - "iphone groene streep scherm"
+  - "iphone voor onderdelen"
+  - "iphone voor reparatie"
+  - "iphone camera glaasje kapot"
+  # Model-specific queries - one per generation to catch fresh listings
+  # that broad queries might miss due to Marktplaats' relevance ranking
+  - "iphone 14 defect"
+  - "iphone 15 defect"
+  - "iphone 16 defect"
+  - "iphone 17 defect"
+  - "iphone 14 kapot"
+  - "iphone 15 kapot"
+  - "iphone 16 kapot"
+  - "iphone 17 kapot"
 
 base_search_url: "https://www.marktplaats.nl/l/telecommunicatie/mobiele-telefoons-apple-iphone/q/{query}/#Sort:SortIndex|dateDesc"
 
-# --- Model filter ---
-# Only listings mentioning one of these are kept. Regex-friendly fragments.
+# --- Model filter (checked against TITLE only) ---
+# Substring matching against the listing title. Since "iphone 14" is a
+# substring of "iphone 14 pro" and "iphone 14 pro max" and "iphone 14 plus",
+# a single base-model entry catches all variants of that generation - no
+# need to enumerate all four variants explicitly. Covers 14, 15, 16, 17
+# and all their Pro/Plus/Pro Max variants. iPhone Air is explicitly
+# excluded via title_model_excludes below.
 target_models:
   - "iphone 14"
   - "iphone14"
@@ -30,9 +51,24 @@ target_models:
   - "iphone15"
   - "iphone 16"
   - "iphone16"
+  - "iphone 17"
+  - "iphone17"
+
+# --- Model exclusions (checked against TITLE only) ---
+# Even if a listing matches a target_models entry, if its title also
+# contains one of these, it's rejected. Used to exclude iPhone Air, since
+# "iphone 17" would substring-match against a hypothetical "iPhone 17 Air"
+# listing otherwise.
+title_model_excludes:
+  - "iphone air"
+  - "iphoneair"
 
 # --- Primary damage keywords (auto-match if present, unless excluded below) ---
+# These represent "cheap, quick fix" damage - the profitable target range.
+# Deep/expensive damage (won't power on, motherboard, water damage) is
+# handled by hard_excludes further down.
 primary_keywords:
+  # Screen damage
   - "scherm gebarsten"
   - "scherm kapot"
   - "scherm defect"
@@ -43,6 +79,7 @@ primary_keywords:
   - "scherm doet het niet"
   - "scherm werkt niet"
   - "groene streep"
+  # Back cover damage
   - "achterkant kapot"
   - "achterkant gebarsten"
   - "achterkant beschadigd"
@@ -50,13 +87,28 @@ primary_keywords:
   - "achterglas kapot"
   - "achterglas beschadigd"
   - "backcover kapot"
+  # Charging problems
   - "laadt niet op"
   - "laad niet op"
   - "oplaadprobleem"
   - "laadprobleem"
   - "gaat niet opladen"
+  # Camera lens glass (typically a cheap glue-on fix, fits the profit model
+  # per Phase 1 discussion - not the same as full camera module failure)
+  - "camera glaasje kapot"
+  - "camera glaasje gebarsten"
+  - "camera glas kapot"
+  - "camera glas gebarsten"
+  - "camera lens kapot"
+  # Self-flagged "for parts/repair" listings - strongest signal that the
+  # seller acknowledges damage and expects a low price
+  - "voor onderdelen"
+  - "voor reparatie"
+  - "voor iemand die handig is"
+  - "geschikt voor onderdelen"
 
 # --- Hard excludes: if ANY of these appear, the listing is skipped no matter what ---
+# Deep/expensive damage or blocking issues that don't fit the profit model.
 hard_excludes:
   - "icloud lock"
   - "icloud-lock"
@@ -69,13 +121,27 @@ hard_excludes:
   - "gaat niet meer aan"
   - "gaat niet aan"
 
-# --- Ambiguous term that needs negation-check before being treated as a hit ---
+# --- Ambiguous terms that route to AI review ---
+# When one of these appears WITHOUT a matching negation phrase nearby,
+# the listing gets sent to Claude Haiku for a relevance judgment. The AI
+# decides if the described defect is plausibly a cheap screen/back/charging
+# repair vs something outside the profit model. Only called for listings
+# that don't already match a primary keyword - saves API cost.
 ambiguous_terms:
   - "mankement"
   - "mankementen"
+  - "gebrek"
+  - "gebreken"
+  - "problemen"
+  - "problemem"   # common typo variant seen on Marktplaats
+  - "iets kleins"
+  - "lichte schade"
+  - "kleine schade"
 
-# If any of these phrases appear near/around an ambiguous term, treat it as a NEGATION
-# (i.e. the seller is saying there ISN'T a defect) - skip without spending an AI call.
+# --- Negation phrases: if any appear, skip AI review entirely (free filter) ---
+# Prevents wasting API calls on listings where the seller is actively
+# saying there's NO defect ("geen mankementen"). This is the cheap
+# pre-filter that stops "no defect" listings from ever reaching the AI.
 negation_phrases:
   - "geen mankement"
   - "geen mankementen"
@@ -83,6 +149,12 @@ negation_phrases:
   - "zonder mankement"
   - "vrij van mankement"
   - "geen gebreken"
+  - "geen enkel gebrek"
+  - "zonder gebreken"
+  - "geen problemen"
+  - "geen enkel probleem"
+  - "zonder problemen"
+  - "geen schade"
 
 # --- Noise filters: business/shop listings and "wanted to buy" ads ---
 business_seller_indicators:
@@ -93,7 +165,7 @@ business_seller_indicators:
   - "afhalen op afspraak"
   - "webshop"
   - "gecontroleerde verkoper"
-business_indicator_threshold: 2  # need 2+ matches to flag as a business listing
+business_indicator_threshold: 2
 
 buyer_ad_indicators:
   - "gevraagd,"
@@ -112,5 +184,5 @@ home_lon: 5.5546
 ai_model: "claude-haiku-4-5-20251001"
 
 # --- Scheduling / behavior ---
-request_delay_seconds: 2   # be polite between requests to Marktplaats
+request_delay_seconds: 2
 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
