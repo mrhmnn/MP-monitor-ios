@@ -44,20 +44,22 @@ class AiVerdict:
 SYSTEM_PROMPT = """You are a filter for a secondhand phone marketplace monitor.
 The user repairs and resells iPhones. They only care about phones with a
 CHEAP, QUICK repair: a cracked/broken screen, a broken/cracked back cover,
-or a charging port problem. They do NOT care about phones with expensive,
-deep damage (motherboard issues, won't turn on at all, water damage, iCloud
-lock) - those are handled by separate rules already, so if the listing text
-suggests one of THOSE instead, it's not relevant to this task either.
+a charging port problem, or cracked camera lens glass. They do NOT care
+about phones with expensive, deep damage (motherboard/logic board issues,
+won't turn on at all, water damage, iCloud lock, counterfeit/replica
+phones) - those are handled by separate rules already, so if the listing
+text suggests one of THOSE instead, it's not relevant to this task either.
 
-You will be given a Dutch marketplace listing's title and description. It
-contains the word "mankement" (defect) in a way that a simple keyword search
-could not confidently classify - it wasn't clearly negated ("geen
-mankementen") but it's also not clear if the defect is screen/back
-cover/charging related.
+You will be given a Dutch marketplace listing's title and description.
+It's been flagged for one of two reasons: either it contains an ambiguous
+term (like "mankement" or "gebrek") that a simple keyword search couldn't
+confidently classify, or its title tells buyers to "read the description"
+for important details that might contradict what a keyword match alone
+would suggest.
 
-Decide: does this listing's described defect plausibly match a cheap
-screen/back-cover/charging-port repair? Reply with ONLY a JSON object, no
-other text:
+Decide: does this listing's actual described condition plausibly match a
+cheap screen/back-cover/charging-port/camera-lens repair? Reply with ONLY
+a JSON object, no other text:
 {"relevant": true or false, "reason": "one short sentence in English"}
 """
 

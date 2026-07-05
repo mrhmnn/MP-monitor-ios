@@ -121,6 +121,13 @@ def evaluate_listing(title: str, description: str, config: dict) -> FilterResult
 
     primary_term = has_primary_match(combined_text, config["primary_keywords"])
     if primary_term:
+        vague_signal = _contains_any(title_lower, config.get("vague_title_signals", []))
+        if vague_signal:
+            return FilterResult(
+                accepted=False,
+                reason=f"vague title ('{vague_signal}') - needs AI confirmation despite keyword match",
+                needs_ai_review=True,
+            )
         return FilterResult(accepted=True, reason=f"primary keyword matched: '{primary_term}'")
 
     if has_unresolved_ambiguous_term(

@@ -120,6 +120,19 @@ hard_excludes:
   - "waterschade"
   - "gaat niet meer aan"
   - "gaat niet aan"
+  # Counterfeit/replica phones - found in production: "voor onderdelen"
+  # matched a "Namaak iPhone" (fake iPhone) listing, since that keyword
+  # doesn't check whether the phone is even genuine.
+  - "namaak"
+  - "replica"
+  - "nep iphone"
+  - "neptelefoon"
+  # Deep/expensive internal damage - found in production: "voor onderdelen"
+  # matched a listing explicitly describing motherboard damage, which is
+  # exactly the deep-damage category outside the cheap-fix profit model.
+  - "moederbord"
+  - "logic board"
+  - "logicboard"
 
 # --- Ambiguous terms that route to AI review ---
 # When one of these appears WITHOUT a matching negation phrase nearby,
@@ -174,6 +187,20 @@ buyer_ad_indicators:
   - "gezocht:"
   - "op zoek naar kapotte"
   - "op zoek naar defecte"
+
+# --- Vague title signals ---
+# If the TITLE contains one of these, the seller is explicitly saying
+# "don't judge this from the title, read the description" - found in
+# production: "iPhone 14 Pro - Lees beschrijving!" auto-matched a primary
+# keyword from its description text without any real scrutiny. Listings
+# with these phrases get routed to AI confirmation even if a primary
+# keyword already matched, rather than being auto-accepted.
+vague_title_signals:
+  - "lees beschrijving"
+  - "zie beschrijving"
+  - "lees de beschrijving"
+  - "beschrijving lezen"
+  - "lees eerst de beschrijving"
 
 # --- Location (for distance calculation) ---
 home_location: "Veenendaal, Netherlands"
