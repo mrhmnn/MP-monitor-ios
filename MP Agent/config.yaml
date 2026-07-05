@@ -1,0 +1,116 @@
+# Marktplaats iPhone Monitor - Configuration
+# Secrets (API keys, tokens) go in .env, NOT here. This file is safe to commit to git.
+
+# --- Search setup ---
+# Each query is run against Marktplaats' search. We deliberately search broad damage
+# phrases (not "iphone 14 scherm kapot" combos) and let the Python filtering logic
+# below decide which model + which damage type actually qualifies. This avoids
+# missing listings just because of how Marktplaats' own search ranks multi-word queries.
+search_queries:
+  - "iphone scherm kapot"
+  - "iphone scherm gebarsten"
+  - "iphone scherm defect"
+  - "iphone scherm beschadigd"
+  - "iphone achterkant kapot"
+  - "iphone achterkant gebarsten"
+  - "iphone achterkant beschadigd"
+  - "iphone laadt niet op"
+  - "iphone oplaadprobleem"
+  - "iphone mankement"
+  - "iphone groene streep scherm"
+
+base_search_url: "https://www.marktplaats.nl/l/telecommunicatie/mobiele-telefoons-apple-iphone/q/{query}/#Sort:SortIndex|dateDesc"
+
+# --- Model filter ---
+# Only listings mentioning one of these are kept. Regex-friendly fragments.
+target_models:
+  - "iphone 14"
+  - "iphone14"
+  - "iphone 15"
+  - "iphone15"
+  - "iphone 16"
+  - "iphone16"
+
+# --- Primary damage keywords (auto-match if present, unless excluded below) ---
+primary_keywords:
+  - "scherm gebarsten"
+  - "scherm kapot"
+  - "scherm defect"
+  - "scherm beschadigd"
+  - "gebarsten scherm"
+  - "kapot scherm"
+  - "beschadigd scherm"
+  - "scherm doet het niet"
+  - "scherm werkt niet"
+  - "groene streep"
+  - "achterkant kapot"
+  - "achterkant gebarsten"
+  - "achterkant beschadigd"
+  - "achterkant los"
+  - "achterglas kapot"
+  - "achterglas beschadigd"
+  - "backcover kapot"
+  - "laadt niet op"
+  - "laad niet op"
+  - "oplaadprobleem"
+  - "laadprobleem"
+  - "gaat niet opladen"
+
+# --- Hard excludes: if ANY of these appear, the listing is skipped no matter what ---
+hard_excludes:
+  - "icloud lock"
+  - "icloud-lock"
+  - "icloud-vergrendeling"
+  - "icloud vergrendeling"
+  - "icloud geblokkeerd"
+  - "activatieslot"
+  - "activatie slot"
+  - "waterschade"
+  - "gaat niet meer aan"
+  - "gaat niet aan"
+
+# --- Ambiguous term that needs negation-check before being treated as a hit ---
+ambiguous_terms:
+  - "mankement"
+  - "mankementen"
+
+# If any of these phrases appear near/around an ambiguous term, treat it as a NEGATION
+# (i.e. the seller is saying there ISN'T a defect) - skip without spending an AI call.
+negation_phrases:
+  - "geen mankement"
+  - "geen mankementen"
+  - "geen enkele mankement"
+  - "zonder mankement"
+  - "vrij van mankement"
+  - "geen gebreken"
+
+# --- Noise filters: business/shop listings and "wanted to buy" ads ---
+business_seller_indicators:
+  - "meerdere op voorraad"
+  - "1 jaar garantie"
+  - "wij kopen"
+  - "onze website"
+  - "afhalen op afspraak"
+  - "webshop"
+  - "gecontroleerde verkoper"
+business_indicator_threshold: 2  # need 2+ matches to flag as a business listing
+
+buyer_ad_indicators:
+  - "gevraagd,"
+  - "ik ben op zoek naar"
+  - "ik zoek"
+  - "gezocht:"
+  - "op zoek naar kapotte"
+  - "op zoek naar defecte"
+
+# --- Location (for distance calculation) ---
+home_location: "Veenendaal, Netherlands"
+home_lat: 52.0227
+home_lon: 5.5546
+
+# --- AI classifier ---
+ai_model: "claude-haiku-4-5-20251001"
+
+# --- Scheduling / behavior ---
+request_delay_seconds: 2   # be polite between requests to Marktplaats
+user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
