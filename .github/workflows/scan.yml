@@ -21,8 +21,24 @@ jobs:
         working-directory: "MP Agent"
 
     steps:
-      - name: Check out repository
+      - name: Check out repository (main branch, for code)
         uses: actions/checkout@v4
+
+      # The database is stored on a separate `data` branch to keep main's
+      # commit history clean (main = code only, data = state snapshots).
+      # This step downloads the latest database from that data branch
+      # into the working directory before the scan runs.
+      - name: Restore database from data branch
+        working-directory: ${{ github.workspace }}
+        run: |
+          # Try to fetch the data branch. If it doesn't exist yet
+          # (very first run), we start fresh with no database.
+          if git ls-remote --exit-code --heads origin data; then
+            git fetch origin data
+            git checkout origin/data -- "MP Agent/seen_listings.db" 2>/dev/null || echo "No existing database on data branch, starting fresh"
+          else
+            echo "data branch does not exist yet, will be created after first scan"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,10 +55,23 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      - name: Save updated database back to the repo
+      # Save the updated database to the `data` branch (a separate branch
+      # dedicated to state snapshots). Force-push the latest snapshot -
+      # we don't care about history for this file, just the current state.
+      # This keeps main's history clean (only code changes appear there).
+      - name: Save updated database to data branch
+        working-directory: ${{ github.workspace }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add seen_listings.db
-          git diff --staged --quiet || git commit -m "Update seen listings database"
-          git push
+
+          # Create an orphan data branch containing ONLY the database file.
+          # Orphan = no shared history with main, keeps it separate and small.
+          # We rebuild this branch from scratch each run - a single commit,
+          # single file, no accumulating history.
+          git checkout --orphan data-tmp
+          git rm -rf --cached . > /dev/null
+          git add "MP Agent/seen_listings.db"
+          git commit -m "Update seen listings database" || echo "No changes to commit"
+          git push origin data-tmp:data --force
+          echo "Database snapshot pushed to data branch"
