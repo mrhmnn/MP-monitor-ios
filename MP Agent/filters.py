@@ -105,6 +105,23 @@ def evaluate_listing(title: str, description: str, config: dict) -> FilterResult
     if re.search(r"\biphone\b.*\bair\b", title_lower):
         return FilterResult(accepted=False, reason="excluded model: iPhone Air variant")
 
+    # Every target model (14-17) ships with OLED, not LCD - Apple has never
+    # put an LCD panel on any of them. So "lcd" in the TITLE of one of
+    # these listings isn't describing the phone's actual screen - it's
+    # someone selling a cheap aftermarket replacement LCD part, or a
+    # repair shop, not a damaged phone. Found in production: "iPhone 14
+    # Pro Max scherm reparatie lcd" matched 'voor reparatie' from the
+    # description while actually being a spare-part/repair listing.
+    # Title-only check: descriptions of genuine damaged phones sometimes
+    # mention "lcd" incidentally (e.g. quoting a repair quote they got),
+    # which shouldn't disqualify them - only the title is a reliable
+    # signal of what's actually being sold.
+    if re.search(r"\blcd\b", title_lower):
+        return FilterResult(
+            accepted=False,
+            reason="title mentions LCD - target models (14-17) are OLED-only, so this is a spare part/repair listing, not a phone",
+        )
+
     if is_business_listing(
         combined_text,
         config["business_seller_indicators"],
