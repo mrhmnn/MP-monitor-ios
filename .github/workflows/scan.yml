@@ -3,11 +3,15 @@ name: Marktplaats iPhone Scan
 # Runs automatically every 30 minutes, and can also be triggered manually
 # from the Actions tab (useful for testing without waiting for the schedule).
 on:
+  # Note: GitHub's own scheduler never once fired in testing (confirmed
+  # with a 1-minute test cron running 15+ minutes with zero triggers, on
+  # top of a full overnight run at 30-min intervals with zero triggers).
+  # Actual automation now runs via an external cron-job.org job calling
+  # this workflow's dispatch endpoint every 30 minutes - this schedule
+  # trigger is left in only as a harmless backup in case GitHub's
+  # scheduler starts working on its own later.
   schedule:
-    # TEMPORARY - every minute, purely to diagnose whether scheduled
-    # triggers fire at all on this repo. Will be reverted to "7,37 * * * *"
-    # once confirmed working.
-    - cron: "* * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 jobs:
