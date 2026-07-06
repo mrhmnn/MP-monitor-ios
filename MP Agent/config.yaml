@@ -213,6 +213,14 @@ ai_model: "claude-haiku-4-5-20251001"
 # --- Scheduling / behavior ---
 request_delay_seconds: 2
 
+# --- Reappeared listings ---
+# Each scan only pulls the newest-30 results per query, so a previously-seen
+# listing that drops out of view has been sold/removed/pushed off the list.
+# If it later resurfaces after sitting untouched for at least this many
+# hours, it's treated as a relist/bump and re-notified (only if it matched
+# our filters the first time around) rather than silently skipped forever.
+reappear_gap_hours: 24
+
 # --- Health monitoring ---
 # If total_fetched across ALL queries in a single run falls below this,
 # something is probably broken (Marktplaats changed their page structure,

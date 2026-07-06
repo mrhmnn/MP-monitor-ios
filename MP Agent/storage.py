@@ -26,10 +26,19 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 title TEXT NOT NULL,
                 url TEXT NOT NULL,
                 matched INTEGER NOT NULL,
-                first_seen_utc TEXT NOT NULL
+                first_seen_utc TEXT NOT NULL,
+                last_seen_utc TEXT NOT NULL
             )
             """
         )
+        # Migrate databases created before last_seen_utc existed - ALTER TABLE
+        # can't express "IF NOT EXISTS" for a column in SQLite, so check first.
+        existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(seen_listings)")}
+        if "last_seen_utc" not in existing_columns:
+            conn.execute("ALTER TABLE seen_listings ADD COLUMN last_seen_utc TEXT")
+            conn.execute(
+                "UPDATE seen_listings SET last_seen_utc = first_seen_utc WHERE last_seen_utc IS NULL"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS geocode_cache (
@@ -62,13 +71,17 @@ def cache_coords(place_name: str, lat: float, lon: float, db_path: Path = DB_PAT
         conn.commit()
 
 
-def is_seen(listing_id: str, db_path: Path = DB_PATH) -> bool:
-    """Return True if we've already processed this listing before."""
+def get_seen_record(listing_id: str, db_path: Path = DB_PATH):
+    """Return {"matched", "first_seen_utc", "last_seen_utc"} if we've processed
+    this listing before, else None."""
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "SELECT 1 FROM seen_listings WHERE listing_id = ?", (listing_id,)
+            "SELECT matched, first_seen_utc, last_seen_utc FROM seen_listings WHERE listing_id = ?",
+            (listing_id,),
         ).fetchone()
-    return row is not None
+    if row is None:
+        return None
+    return {"matched": bool(row[0]), "first_seen_utc": row[1], "last_seen_utc": row[2]}
 
 
 def mark_seen(
@@ -83,15 +96,45 @@ def mark_seen(
     We record non-matches too, so we don't waste time/tokens re-evaluating
     the same irrelevant listing every single run.
     """
+    now = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
-            INSERT OR IGNORE INTO seen_listings (listing_id, title, url, matched, first_seen_utc)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO seen_listings
+                (listing_id, title, url, matched, first_seen_utc, last_seen_utc)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (listing_id, title, url, int(matched), datetime.now(timezone.utc).isoformat()),
+            (listing_id, title, url, int(matched), now, now),
         )
         conn.commit()
+
+
+def touch_last_seen(listing_id: str, db_path: Path = DB_PATH) -> None:
+    """Update last_seen_utc to now for a listing we've encountered again."""
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE seen_listings SET last_seen_utc = ? WHERE listing_id = ?",
+            (datetime.now(timezone.utc).isoformat(), listing_id),
+        )
+        conn.commit()
+
+
+def check_reappeared(listing_id: str, gap_hours: float, db_path: Path = DB_PATH) -> bool:
+    """
+    Return True if this listing was last seen more than `gap_hours` ago.
+    Since each scan only pulls the newest-30 results per query, a listing
+    that drops out of view has been sold/removed/pushed off the list - if
+    it later resurfaces, that's a relist/bump, not the same scan re-finding
+    it, and is worth treating as a fresh opportunity again.
+    """
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT last_seen_utc FROM seen_listings WHERE listing_id = ?", (listing_id,)
+        ).fetchone()
+    if row is None or row[0] is None:
+        return False
+    gap = datetime.now(timezone.utc) - datetime.fromisoformat(row[0])
+    return gap.total_seconds() > gap_hours * 3600
 
 
 def count_seen(db_path: Path = DB_PATH) -> int:

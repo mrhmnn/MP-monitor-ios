@@ -60,24 +60,41 @@ def run_scan_cycle(config: dict) -> None:
         total_fetched += len(listings)
 
         for listing in listings:
-            if storage.is_seen(listing.listing_id):
-                continue  # already processed in a previous run
+            seen_record = storage.get_seen_record(listing.listing_id)
 
-            total_new += 1
-            result = filters.evaluate_listing(listing.title, listing.description_snippet, config)
+            if seen_record is None:
+                total_new += 1
+                result = filters.evaluate_listing(listing.title, listing.description_snippet, config)
 
-            accepted = result.accepted
-            reason = result.reason
+                accepted = result.accepted
+                reason = result.reason
 
-            # Ambiguous case ("mankement" without clear negation) - ask the AI
-            if result.needs_ai_review:
-                verdict = ai_classifier.classify_ambiguous_listing(
-                    listing.combined_text, config["ai_model"]
+                # Ambiguous case ("mankement" without clear negation) - ask the AI
+                if result.needs_ai_review:
+                    verdict = ai_classifier.classify_ambiguous_listing(
+                        listing.combined_text, config["ai_model"]
+                    )
+                    accepted = verdict.relevant
+                    reason = f"AI review: {verdict.reason}"
+
+                storage.mark_seen(listing.listing_id, listing.title, listing.url, accepted)
+            else:
+                # Already processed before. Each scan only pulls the newest-30
+                # results per query, so a listing that's been off our radar
+                # for a while and just resurfaced was almost certainly
+                # relisted/bumped - re-notify on it if it was a match before.
+                # Otherwise it's just the same listing still sitting in the
+                # newest-30 window, or a previously-rejected one - nothing new.
+                reappeared = storage.check_reappeared(
+                    listing.listing_id, config.get("reappear_gap_hours", 24)
                 )
-                accepted = verdict.relevant
-                reason = f"AI review: {verdict.reason}"
+                storage.touch_last_seen(listing.listing_id)
 
-            storage.mark_seen(listing.listing_id, listing.title, listing.url, accepted)
+                if not (reappeared and seen_record["matched"]):
+                    continue
+
+                accepted = True
+                reason = "Reappeared after being off-market - originally matched"
 
             if not accepted:
                 logger.debug("Rejected '%s': %s", listing.title, reason)
