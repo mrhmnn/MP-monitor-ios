@@ -212,4 +212,13 @@ ai_model: "claude-haiku-4-5-20251001"
 
 # --- Scheduling / behavior ---
 request_delay_seconds: 2
+
+# --- Health monitoring ---
+# If total_fetched across ALL queries in a single run falls below this,
+# something is probably broken (Marktplaats changed their page structure,
+# started blocking the scraper, etc.) rather than there genuinely being
+# fewer listings today. A Telegram alert gets sent so this surfaces
+# immediately instead of silently degrading matches for days, the way the
+# original scraper bug did before anyone noticed.
+alert_min_total_fetched: 30
 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"

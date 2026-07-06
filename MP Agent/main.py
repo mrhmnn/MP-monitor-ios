@@ -44,6 +44,7 @@ def run_scan_cycle(config: dict) -> None:
 
     total_fetched = 0
     total_new = 0
+    failed_queries = 0
     matches = []  # collected here, sent (sorted by distance) at the end
 
     for query in config["search_queries"]:
@@ -53,6 +54,7 @@ def run_scan_cycle(config: dict) -> None:
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to fetch listings for query '%s': %s", query, exc)
+            failed_queries += 1
             continue
 
         total_fetched += len(listings)
@@ -142,6 +144,36 @@ def run_scan_cycle(config: dict) -> None:
         len(matches),
         storage.count_seen(),
     )
+
+    # Health check: a suspiciously low fetch count almost always means
+    # something broke (site structure changed, requests started getting
+    # blocked, etc.) rather than there genuinely being few listings today -
+    # 22 queries returning next to nothing is not a normal day. This is the
+    # exact failure mode that went unnoticed for hours the first time
+    # around, so it gets flagged loudly instead of failing silently.
+    total_queries = len(config["search_queries"])
+    min_expected = config.get("alert_min_total_fetched", 30)
+    all_queries_failed = total_queries > 0 and failed_queries == total_queries
+
+    if total_fetched < min_expected or all_queries_failed:
+        alert_lines = [
+            "⚠️ *Scan health warning*",
+            f"Only {total_fetched} listings fetched across {total_queries} queries "
+            f"(expected at least {min_expected}).",
+        ]
+        if failed_queries:
+            alert_lines.append(f"{failed_queries} of {total_queries} queries raised an error.")
+        alert_lines.append(
+            "This usually means Marktplaats changed something or is blocking "
+            "requests, not that there are genuinely fewer listings today. Worth "
+            "checking the scraper manually."
+        )
+        alert_sent = telegram_notifier.send_message("\n".join(alert_lines))
+        logger.warning(
+            "Low fetch count detected (%d < %d) - health alert %s",
+            total_fetched, min_expected,
+            "sent" if alert_sent else "FAILED TO SEND",
+        )
 
 
 if __name__ == "__main__":
