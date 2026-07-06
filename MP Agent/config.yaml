@@ -34,6 +34,11 @@ search_queries:
   - "iphone 15 kapot"
   - "iphone 16 kapot"
   - "iphone 17 kapot"
+  # Added — broader damage phrasing not covered by the queries above
+  - "iphone display kapot"
+  - "iphone touchscreen kapot"
+  - "iphone valschade"
+  - "iphone gebutst"
 
 base_search_url: "https://www.marktplaats.nl/l/telecommunicatie/mobiele-telefoons-apple-iphone/q/{query}/#Sort:SortIndex|dateDesc"
 
@@ -79,6 +84,13 @@ primary_keywords:
   - "scherm doet het niet"
   - "scherm werkt niet"
   - "groene streep"
+  # Added — screen damage phrasing variants
+  - "display kapot"
+  - "display defect"
+  - "touchscreen kapot"
+  - "touchscreen defect"
+  - "scherm barst"
+  - "scherm gebroken"
   # Back cover damage
   - "achterkant kapot"
   - "achterkant gebarsten"
@@ -87,12 +99,20 @@ primary_keywords:
   - "achterglas kapot"
   - "achterglas beschadigd"
   - "backcover kapot"
+  # Added — back cover phrasing variants
+  - "achterkant gebroken"
+  - "glas achterkant kapot"
+  - "deksel kapot"
   # Charging problems
   - "laadt niet op"
   - "laad niet op"
   - "oplaadprobleem"
   - "laadprobleem"
   - "gaat niet opladen"
+  # Added — charging phrasing variants
+  - "batterij defect"
+  - "laadpoort kapot"
+  - "lightning poort defect"
   # Camera lens glass (typically a cheap glue-on fix, fits the profit model
   # per Phase 1 discussion - not the same as full camera module failure)
   - "camera glaasje kapot"
@@ -150,6 +170,13 @@ ambiguous_terms:
   - "iets kleins"
   - "lichte schade"
   - "kleine schade"
+  # Added — broader damage signals that deserve an AI judgment call
+  # rather than an outright miss or an unchecked auto-match
+  - "valschade"
+  - "gevallen"
+  - "gebutst"
+  - "deuk"
+  - "beschadigd"   # bare, unqualified — could be screen/back/case/cosmetic-only
 
 # --- Negation phrases: if any appear, skip AI review entirely (free filter) ---
 # Prevents wasting API calls on listings where the seller is actively
