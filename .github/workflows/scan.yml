@@ -75,7 +75,11 @@ jobs:
           # single file, no accumulating history.
           git checkout --orphan data-tmp
           git rm -rf --cached . > /dev/null
-          git add "MP Agent/seen_listings.db"
+          # -f (force) is required here: the repo's .gitignore (still present
+          # in the working directory even after --orphan) excludes this file
+          # so it stays untracked on main - but on this dedicated data
+          # branch we explicitly want to track it, so we override that.
+          git add -f "MP Agent/seen_listings.db"
           git commit -m "Update seen listings database" || echo "No changes to commit"
           git push origin data-tmp:data --force
           echo "Database snapshot pushed to data branch"
