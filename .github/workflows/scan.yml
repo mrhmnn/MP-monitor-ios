@@ -4,11 +4,10 @@ name: Marktplaats iPhone Scan
 # from the Actions tab (useful for testing without waiting for the schedule).
 on:
   schedule:
-    # Every 30 minutes, but offset from :00/:30 - GitHub's docs flag the
-    # top and bottom of every hour as the highest-congestion times for
-    # scheduled Actions, when runs are most likely to be delayed or
-    # dropped. Running at :07/:37 instead avoids that queue.
-    - cron: "7,37 * * * *"
+    # TEMPORARY - every minute, purely to diagnose whether scheduled
+    # triggers fire at all on this repo. Will be reverted to "7,37 * * * *"
+    # once confirmed working.
+    - cron: "* * * * *"
   workflow_dispatch:
 
 jobs:
