@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.env
+MP Agent/seen_listings.db

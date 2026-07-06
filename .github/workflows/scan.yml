@@ -4,7 +4,11 @@ name: Marktplaats iPhone Scan
 # from the Actions tab (useful for testing without waiting for the schedule).
 on:
   schedule:
-    - cron: "*/30 * * * *"   # every 30 minutes, in UTC time
+    # Every 30 minutes, but offset from :00/:30 - GitHub's docs flag the
+    # top and bottom of every hour as the highest-congestion times for
+    # scheduled Actions, when runs are most likely to be delayed or
+    # dropped. Running at :07/:37 instead avoids that queue.
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 jobs:
