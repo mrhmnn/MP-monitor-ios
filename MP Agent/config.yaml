@@ -234,8 +234,30 @@ home_location: "Veenendaal, Netherlands"
 home_lat: 52.0227
 home_lon: 5.5546
 
+# Hard cutoff: matches with a KNOWN driving distance beyond this many km
+# are skipped entirely (not worth the trip). Matches whose distance
+# couldn't be determined are still sent - better to eyeball a city name
+# manually than to silently drop a potentially close listing.
+max_distance_km: 200
+
+# --- Structured business-seller rejection (from Marktplaats' own listing data) ---
+# seller_with_website: the seller has a business website linked on the
+# listing - that's a shop by definition.
+# priority_listings: DAGTOPPER/TOPADVERTENTIE paid placements - verified
+# live that repair shops use these constantly, private sellers of a single
+# broken phone essentially never.
+reject_seller_with_website: true
+reject_priority_listings: true
+
 # --- AI classifier ---
 ai_model: "claude-haiku-4-5-20251001"
+
+# Send target-model listings that matched NO damage keyword at all to the
+# AI as well (instead of silently rejecting them). Catches damage phrasings
+# the keyword lists don't cover ("iPhone 14 kapot", "glas stuk zie fotos").
+# Negation-guarded, only runs for genuinely new listings, Haiku-priced -
+# a handful of calls per scan. Set false to rein in API usage.
+ai_review_unmatched: true
 
 # --- Scheduling / behavior ---
 request_delay_seconds: 2

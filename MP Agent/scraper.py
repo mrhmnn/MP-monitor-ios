@@ -29,8 +29,8 @@ extraction against a live URL before wiring it into main.py.
 import json
 import logging
 import re
-import re
 from dataclasses import dataclass
+from typing import Optional
 from urllib.parse import quote
 
 import httpx
@@ -38,14 +38,19 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-# --- Best-effort selectors - VERIFY THESE against the live page (see docstring above) ---
+# --- Fallback CSS selectors, verified against the live page on 2026-07-07 ---
+# Marktplaats now uses CSS-module class names (e.g.
+# "ListingTitle_hz-Listing-title-new__YIv8B") - the hash suffix changes on
+# every frontend deploy, so we match on the stable module prefix with
+# [class*=...]. The older selectors are kept behind them in each comma list
+# as a second chance in case Marktplaats reverts or A/B-tests the old markup.
 SELECTORS = {
     "listing_container": "li[class*='hz-Listing'], article[data-testid*='listing']",
-    "title": "[data-testid='listing-title'], h3, .hz-Listing-title",
-    "price": "[data-testid='listing-price'], .hz-Listing-price",
+    "title": "[class*='ListingTitle_hz-Listing-title'], [data-testid='listing-title'], h3, .hz-Listing-title",
+    "price": "[class*='ListingPrice_hz-Listing-price'], [data-testid='listing-price'], .hz-Listing-price",
     "link": "a[href*='/v/']",
-    "location": "[data-testid='listing-location'], .hz-Listing-location",
-    "description_snippet": "[data-testid='listing-description'], .hz-Listing-description",
+    "location": "[data-testid='location-label'], [data-testid='listing-location'], .hz-Listing-location",
+    "description_snippet": "[class*='ListingDescription_hz-Listing-description'], [data-testid='listing-description'], .hz-Listing-description",
 }
 
 
@@ -58,9 +63,18 @@ class Listing:
     location_text: str
     url: str
     posted_date: str = ""
-    latitude: float = None
-    longitude: float = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     image_url: str = ""
+    # Structured seller signals from the embedded JSON (search results only,
+    # not available via the HTML fallback) - used by filters.py to reject
+    # repair shops / professional sellers cheaply.
+    seller_name: str = ""
+    seller_has_website: bool = False
+    # "NONE" for normal listings; "DAGTOPPER"/"TOPADVERTENTIE" are paid
+    # promoted placements - private individuals dumping a broken phone
+    # almost never pay to promote, repair shops constantly do.
+    priority_product: str = "NONE"
 
     @property
     def combined_text(self) -> str:
@@ -92,24 +106,87 @@ def get_accurate_posting_date(url: str, user_agent: str) -> str:
         return ""
 
 
+def get_full_listing_text(url: str, user_agent: str) -> str:
+    """
+    Fetch a listing's FULL description from its own page. The search
+    results JSON truncates descriptions at ~200 characters (verified live
+    2026-07-07), which is exactly the text the AI classifier judges
+    ambiguous listings on - meaning "lees beschrijving" listings were
+    being classified on a snippet that may cut off before the part that
+    matters. The listing page's description block
+    ([data-collapsable='description'], verified live) has the whole thing.
+
+    Only called for the handful of AI-review cases per run, not for every
+    scanned listing. Returns "" on any failure - callers fall back to the
+    snippet they already have.
+    """
+    try:
+        html = fetch_page(url, user_agent)
+        soup = BeautifulSoup(html, "html.parser")
+        block = soup.select_one("[data-collapsable='description']") or soup.select_one(
+            "div[class*='description']"
+        )
+        if block:
+            return block.get_text(" ", strip=True)
+        return ""
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch full description for %s: %s", url, exc)
+        return ""
+
+
 def build_search_url(base_url_template: str, query: str) -> str:
     return base_url_template.format(query=quote(query))
 
 
+# One shared client per process: reuses TCP/TLS connections across the
+# ~26 search queries plus per-match detail fetches in a scan, instead of
+# a full handshake per request. The script is run-and-exit, so the OS
+# cleans the connection up at the end - no explicit close needed.
+_http_client: Optional[httpx.Client] = None
+
+
+def _get_http_client(user_agent: str, timeout: float) -> httpx.Client:
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.Client(
+            headers={
+                "User-Agent": user_agent,
+                "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8",
+            },
+            timeout=timeout,
+            follow_redirects=True,
+        )
+    return _http_client
+
+
 def fetch_page(url: str, user_agent: str, timeout: float = 15.0) -> str:
-    headers = {
-        "User-Agent": user_agent,
-        "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8",
-    }
-    with httpx.Client(headers=headers, timeout=timeout, follow_redirects=True) as client:
+    client = _get_http_client(user_agent, timeout)
+    try:
+        resp = client.get(url)
+        resp.raise_for_status()
+        return resp.text
+    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+        # One retry on transient failures (timeouts, connection resets,
+        # 5xx). Without this, a single network hiccup silently costs the
+        # whole query's 30 newest listings for that run. Client errors
+        # like 404 won't be cured by retrying, so skip those.
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+            raise
+        logger.warning("Fetch failed for %s (%s), retrying once", url, exc)
         resp = client.get(url)
         resp.raise_for_status()
         return resp.text
 
 
 def _extract_listing_id_from_url(url: str) -> str:
-    """Marktplaats listing URLs look like .../v/category/12345-some-title.html"""
-    match = re.search(r"/(\d{6,})-", url)
+    """
+    Marktplaats listing URLs look like .../v/category/subcategory/m2409612663-some-title
+    (verified live 2026-07-07). The m-prefixed ID is kept as-is so it's
+    identical to the `itemId` the JSON strategy stores - if the two
+    strategies produced different IDs for the same listing, a strategy
+    switchover would re-alert on everything already seen.
+    """
+    match = re.search(r"/(m?\d{6,})-", url)
     if match:
         return match.group(1)
     # Fallback: just use the whole URL as the id if the pattern doesn't match
@@ -184,6 +261,8 @@ def _parse_json_blob(html: str) -> list[Listing]:
                     elif raw.startswith("http"):
                         image_url = raw
 
+            seller = item.get("sellerInformation", {}) if isinstance(item.get("sellerInformation"), dict) else {}
+
             listings.append(
                 Listing(
                     listing_id=str(item.get("itemId", item.get("id", ""))),
@@ -196,6 +275,9 @@ def _parse_json_blob(html: str) -> list[Listing]:
                     latitude=location.get("latitude"),
                     longitude=location.get("longitude"),
                     image_url=image_url,
+                    seller_name=seller.get("sellerName", ""),
+                    seller_has_website=bool(seller.get("showWebsiteUrl", False)),
+                    priority_product=item.get("priorityProduct", "NONE") or "NONE",
                 )
             )
         except Exception as exc:  # noqa: BLE001

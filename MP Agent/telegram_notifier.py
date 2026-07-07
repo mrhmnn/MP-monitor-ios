@@ -13,6 +13,7 @@ Setup (one-time):
      TELEGRAM_CHAT_ID.
 """
 
+import html
 import logging
 import os
 
@@ -22,6 +23,13 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_SEND_MESSAGE = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_SEND_PHOTO = "https://api.telegram.org/bot{token}/sendPhoto"
+
+# HTML parse mode, not Markdown. Telegram's legacy Markdown mode makes the
+# API reject the ENTIRE message with a 400 if the text contains an unpaired
+# *, _, [ or ` - and listing titles are user-written text that regularly
+# contains exactly those characters ("iPhone 14 *NIEUW*", "LET OP_..."),
+# which meant a silently lost alert. With HTML mode we control the only
+# markup ourselves and html.escape() the user-written parts.
 
 
 def _get_credentials():
@@ -46,7 +54,7 @@ def send_message(text: str) -> bool:
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML",
         "disable_web_page_preview": False,
     }
 
@@ -85,7 +93,7 @@ def send_photo(image_url: str, caption: str) -> bool:
         "chat_id": chat_id,
         "photo": image_url,
         "caption": caption[:1024],
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML",
     }
 
     try:
@@ -122,20 +130,22 @@ def format_listing_message(
     duration_minutes: int | None,
     posted_date: str = "",
 ) -> str:
-    lines = [f"*{title}*", f"💰 {price_text or 'Bieden'}"]
+    # User-written text (title, reason, price, date) gets escaped so it can
+    # never break the HTML parse mode - see note at the top of this module.
+    lines = [f"<b>{html.escape(title)}</b>", f"💰 {html.escape(price_text or 'Bieden')}"]
 
     if posted_date:
         # Note: Marktplaats' individual listing pages show a "Sinds <date>"
         # field (e.g. "Sinds 8 jun '26") which is the true original posting
         # date - not the bump/repost date shown in search results.
-        lines.append(f"🗓️ {posted_date}")
+        lines.append(f"🗓️ {html.escape(posted_date)}")
 
     if distance_km is not None and duration_minutes is not None:
         lines.append(f"📍 {distance_km:.0f} km · 🚗 ~{duration_minutes} min from Veenendaal")
     else:
         lines.append("📍 distance unavailable")
 
-    lines.append(f"🔧 {match_reason}")
-    lines.append(f"[Open listing]({url})")
+    lines.append(f"🔧 {html.escape(match_reason)}")
+    lines.append(f'<a href="{html.escape(url, quote=True)}">Open listing</a>')
 
     return "\n".join(lines)

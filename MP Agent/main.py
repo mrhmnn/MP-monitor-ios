@@ -45,6 +45,8 @@ def run_scan_cycle(config: dict) -> None:
     total_fetched = 0
     total_new = 0
     failed_queries = 0
+    ai_calls = 0
+    skipped_too_far = 0
     matches = []  # collected here, sent (sorted by distance) at the end
 
     for query in config["search_queries"]:
@@ -64,15 +66,32 @@ def run_scan_cycle(config: dict) -> None:
 
             if seen_record is None:
                 total_new += 1
-                result = filters.evaluate_listing(listing.title, listing.description_snippet, config)
+                result = filters.evaluate_listing(
+                    listing.title,
+                    listing.description_snippet,
+                    config,
+                    seller_has_website=listing.seller_has_website,
+                    priority_product=listing.priority_product,
+                )
 
                 accepted = result.accepted
                 reason = result.reason
 
                 # Ambiguous case ("mankement" without clear negation) - ask the AI
                 if result.needs_ai_review:
+                    # The search-results description is truncated at ~200
+                    # chars - for "lees beschrijving" cases especially, the
+                    # detail that decides relevance often sits past that
+                    # cutoff. Fetch the full description from the listing
+                    # page so the AI judges the whole story (only done for
+                    # the few AI-review cases per run, not every listing).
+                    full_text = scraper.get_full_listing_text(listing.url, config["user_agent"])
+                    ai_input = (
+                        f"{listing.title}\n{full_text}" if full_text else listing.combined_text
+                    )
+                    ai_calls += 1
                     verdict = ai_classifier.classify_ambiguous_listing(
-                        listing.combined_text, config["ai_model"]
+                        ai_input, config["ai_model"]
                     )
                     accepted = verdict.relevant
                     reason = f"AI review: {verdict.reason}"
@@ -121,6 +140,24 @@ def run_scan_cycle(config: dict) -> None:
                     listing.location_text or "Netherlands", config["home_location"]
                 )
 
+            # Distance cutoff: alerts are only useful if the phone is
+            # actually collectable. Listings with UNKNOWN distance still
+            # go through (better a manual look at the city name than a
+            # silently dropped match), but a known distance beyond the
+            # radius is a hard skip.
+            max_km = config.get("max_distance_km")
+            if (
+                max_km is not None
+                and dist_result.distance_km is not None
+                and dist_result.distance_km > max_km
+            ):
+                skipped_too_far += 1
+                logger.info(
+                    "Skipping '%s' - %.0f km away (max %d km)",
+                    listing.title, dist_result.distance_km, max_km,
+                )
+                continue
+
             matches.append(
                 {
                     "listing": listing,
@@ -155,10 +192,13 @@ def run_scan_cycle(config: dict) -> None:
         telegram_notifier.send_listing(match["listing"].image_url, message)
 
     logger.info(
-        "Scan complete. Fetched: %d | New: %d | Matched: %d | Total tracked: %d",
+        "Scan complete. Fetched: %d | New: %d | Matched: %d | Too far: %d | "
+        "AI calls: %d | Total tracked: %d",
         total_fetched,
         total_new,
         len(matches),
+        skipped_too_far,
+        ai_calls,
         storage.count_seen(),
     )
 
@@ -174,7 +214,7 @@ def run_scan_cycle(config: dict) -> None:
 
     if total_fetched < min_expected or all_queries_failed:
         alert_lines = [
-            "⚠️ *Scan health warning*",
+            "⚠️ <b>Scan health warning</b>",
             f"Only {total_fetched} listings fetched across {total_queries} queries "
             f"(expected at least {min_expected}).",
         ]

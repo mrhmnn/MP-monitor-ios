@@ -74,7 +74,13 @@ def has_unresolved_ambiguous_term(
     return True
 
 
-def evaluate_listing(title: str, description: str, config: dict) -> FilterResult:
+def evaluate_listing(
+    title: str,
+    description: str,
+    config: dict,
+    seller_has_website: bool = False,
+    priority_product: str = "NONE",
+) -> FilterResult:
     """
     Main entry point.
 
@@ -89,6 +95,11 @@ def evaluate_listing(title: str, description: str, config: dict) -> FilterResult
 
     Same title-only rule applies to title_model_excludes (iPhone Air) -
     only the title determines model identity.
+
+    `seller_has_website` / `priority_product` come from Marktplaats' own
+    structured listing data (scraper.Listing) - much stronger business
+    signals than keyword heuristics, but only available via the JSON
+    extraction path, so the keyword-based business check stays as backup.
     """
     title_lower = title.lower()
     combined_text = f"{title} {description}".lower()
@@ -96,14 +107,31 @@ def evaluate_listing(title: str, description: str, config: dict) -> FilterResult
     if not matches_target_model(title_lower, config["target_models"]):
         return FilterResult(accepted=False, reason="not a target model (14-17) in title")
 
-    # Explicitly reject iPhone Air listings even if the base-model check
-    # passed via substring match. We use word-boundary regex here rather
-    # than plain substring because Apple's naming is "iPhone 17 Air" (with
-    # the generation number in between), so a simple "iphone air"
-    # substring check would miss it. \b ensures we don't accidentally
-    # match "airbag" or similar words.
+    # Configurable title-level model exclusions (e.g. "iphone air").
+    excluded_model = _contains_any(title_lower, config.get("title_model_excludes", []))
+    if excluded_model:
+        return FilterResult(accepted=False, reason=f"excluded model in title: '{excluded_model}'")
+
+    # Also reject iPhone Air listings via regex, since Apple's naming is
+    # "iPhone 17 Air" (generation number in between) - a plain substring
+    # entry like "iphone air" can't catch that. \b ensures we don't
+    # accidentally match "airbag" or similar words.
     if re.search(r"\biphone\b.*\bair\b", title_lower):
         return FilterResult(accepted=False, reason="excluded model: iPhone Air variant")
+
+    # Structured business-seller signals from Marktplaats' own data:
+    # a seller with a linked business website is a shop by definition, and
+    # paid promoted placements (DAGTOPPER etc.) are overwhelmingly repair
+    # shops - private individuals selling one broken phone don't pay to
+    # promote it. Both are config-gated so they're easy to loosen if a
+    # legitimate listing ever gets caught.
+    if config.get("reject_seller_with_website", True) and seller_has_website:
+        return FilterResult(accepted=False, reason="seller has a business website linked")
+    if config.get("reject_priority_listings", True) and priority_product not in ("", "NONE"):
+        return FilterResult(
+            accepted=False,
+            reason=f"paid promoted listing ({priority_product}) - almost always a shop",
+        )
 
     # Every target model (14-17) ships with OLED, not LCD - Apple has never
     # put an LCD panel on any of them. So "lcd" in the TITLE of one of
@@ -129,7 +157,11 @@ def evaluate_listing(title: str, description: str, config: dict) -> FilterResult
     ):
         return FilterResult(accepted=False, reason="looks like a business/shop listing")
 
-    if is_buyer_ad(combined_text, config["buyer_ad_indicators"]):
+    # TITLE-only on purpose: buyer ads ("gezocht: kapotte iphone") state
+    # their intent in the title, while genuine sellers regularly use the
+    # same phrases incidentally in descriptions ("ik zoek een snelle
+    # verkoop") - checking the combined text was rejecting real listings.
+    if is_buyer_ad(title_lower, config["buyer_ad_indicators"]):
         return FilterResult(accepted=False, reason="looks like a 'wanted to buy' ad, not a listing")
 
     excluded_term = has_hard_exclude(combined_text, config["hard_excludes"])
@@ -153,6 +185,22 @@ def evaluate_listing(title: str, description: str, config: dict) -> FilterResult
         return FilterResult(
             accepted=False,
             reason="ambiguous term present, needs AI review",
+            needs_ai_review=True,
+        )
+
+    # No keyword matched at all - but this listing came from a damage-focused
+    # search query, names a target model, and survived every shop/buyer/
+    # hard-exclude gate. "iPhone 14 kapot - zie fotos" describes exactly the
+    # phones we want and contains zero primary keywords; silently dropping
+    # this bucket loses real deals over phrasing. Let the AI judge them
+    # (negation-guarded like the ambiguous path, so "geen schade" listings
+    # never cost a call). Config-gated in case call volume ever needs reining in.
+    if config.get("ai_review_unmatched", True) and not _contains_any(
+        combined_text, config["negation_phrases"]
+    ):
+        return FilterResult(
+            accepted=False,
+            reason="no keyword match - needs AI judgment",
             needs_ai_review=True,
         )
 

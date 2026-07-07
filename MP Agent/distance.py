@@ -30,7 +30,7 @@ import storage
 logger = logging.getLogger(__name__)
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-OSRM_URL = "http://router.project-osrm.org/route/v1/driving/{coords}"
+OSRM_URL = "https://router.project-osrm.org/route/v1/driving/{coords}"
 
 # Nominatim's usage policy requires a real, descriptive User-Agent
 USER_AGENT = "marktplaats-iphone-monitor/1.0 (personal use script)"

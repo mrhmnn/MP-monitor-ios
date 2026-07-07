@@ -51,11 +51,15 @@ phones) - those are handled by separate rules already, so if the listing
 text suggests one of THOSE instead, it's not relevant to this task either.
 
 You will be given a Dutch marketplace listing's title and description.
-It's been flagged for one of two reasons: either it contains an ambiguous
-term (like "mankement" or "gebrek") that a simple keyword search couldn't
-confidently classify, or its title tells buyers to "read the description"
+It's been flagged for one of three reasons: it contains an ambiguous term
+(like "mankement" or "gebrek") that a simple keyword search couldn't
+confidently classify; its title tells buyers to "read the description"
 for important details that might contradict what a keyword match alone
-would suggest.
+would suggest; or it names a target iPhone model and came from a
+damage-focused search but matched no known damage keyword - meaning the
+seller described the damage in their own words (e.g. just "kapot" or
+"glas stuk, zie fotos") and you need to judge whether that damage
+plausibly falls in the cheap-repair category.
 
 Decide: does this listing's actual described condition plausibly match a
 cheap screen/back-cover/charging-port/camera-lens repair? Reply with ONLY
