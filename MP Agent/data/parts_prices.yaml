@@ -1,0 +1,122 @@
+# Foneday parts prices - repair-cost inputs for Phase 2 profit filter
+# Generated 2026-07-08 from foneday.shop customer pricing (account: Adam Girowal).
+# Prices EUR, wholesale (your logged-in price), cheapest IN-STOCK option per tier.
+# Regenerate with: python refresh_prices.py   (needs FONEDAY_EMAIL/FONEDAY_PASSWORD in .env)
+#
+# screen tiers: incell = cheap aftermarket LCD/in-cell (no true-tone, budget flips)
+#               oled   = OLED/hard-soft OLED (looks like original, safer resale)
+# back_cover = cheapest available back-cover/housing part (Pro models = full housing, pricey)
+# camera_lens = camera glass/lens only (cheap glue-on fix)
+
+meta:
+  generated: 2026-07-08
+  source: foneday.shop
+  currency: EUR
+  total_parts_indexed: 374
+
+repair_costs:
+  "iphone 14":
+    screen_incell: 11.57
+    screen_oled: 23.95
+    back_cover: 16.73
+    charging_port: 2.95
+    camera_lens: 1.35
+    battery: 4.95
+  "iphone 14 plus":
+    screen_incell: 15.91
+    screen_oled: 29.92
+    back_cover: 20.34
+    charging_port: 2.95
+    camera_lens: 1.35
+    battery: 4.95
+  "iphone 14 pro":
+    screen_incell: 13.95
+    screen_oled: 29.95
+    back_cover: 79.95
+    charging_port: 2.95
+    camera_lens: 1.49
+    battery: 9.95
+  "iphone 14 pro max":
+    screen_incell: 14.95
+    screen_oled: 34.67
+    back_cover: 89.95
+    charging_port: 2.95
+    camera_lens: 1.49
+    battery: 7.50
+  "iphone 15":
+    screen_incell: 13.95
+    screen_oled: 29.95
+    back_cover: 23.77
+    charging_port: 6.95
+    camera_lens: 1.61
+    battery: 4.95
+  "iphone 15 plus":
+    screen_incell: 12.95
+    screen_oled: 37.76
+    back_cover: 31.60
+    charging_port: 7.95
+    camera_lens: 1.61
+    battery: 5.95
+  "iphone 15 pro":
+    screen_incell: 13.95
+    screen_oled: 24.65
+    back_cover: 48.33
+    charging_port: 2.95
+    camera_lens: 1.96
+    battery: 5.50
+  "iphone 15 pro max":
+    screen_incell: 15.95
+    screen_oled: 31.42
+    back_cover: 51.46
+    charging_port: 2.95
+    camera_lens: 1.84
+    battery: 12.95
+  "iphone 16":
+    screen_incell: 13.95
+    screen_oled: 32.95
+    back_cover: 47.95
+    charging_port: 3.95
+    camera_lens: 1.27
+    battery: 4.95
+  "iphone 16 plus":
+    screen_incell: 14.95
+    screen_oled: 36.84
+    back_cover: 59.95
+    charging_port: 3.95
+    camera_lens: 1.27
+    battery: 5.95
+  "iphone 16 pro":
+    screen_incell: 24.58
+    screen_oled: 49.78
+    back_cover: 69.95
+    charging_port: 2.95
+    camera_lens: 1.55
+    battery: 6.95
+  "iphone 16 pro max":
+    screen_incell: 19.95
+    screen_oled: 42.05
+    back_cover: 76.95
+    charging_port: 2.95
+    camera_lens: 1.55
+    battery: 6.95
+  "iphone 17":
+    screen_incell: 26.77
+    screen_oled: 53.39
+    back_cover: 61.56
+    charging_port: 15.09
+    camera_lens: 1.55
+    battery: 59.07
+  "iphone 17 pro":
+    screen_incell: 29.69
+    screen_oled: 52.26
+    back_cover: 55.75
+    charging_port: 22.28
+    camera_lens: 1.55
+    battery: 58.86
+  "iphone 17 pro max":
+    screen_incell: 31.95
+    screen_oled: 46.45
+    back_cover: 55.49
+    charging_port: 42.75
+    camera_lens: 1.55
+    battery: 62.90
