@@ -86,11 +86,41 @@ adjust what counts as a match, an exclusion, or noise. Edit and re-run.
   persistent process (webhook/long-polling), not a cron script that exits.
   `distance.get_transit_time()` exists and works, it's just not wired into
   the automated flow yet.
-- **Negotiation/reply drafting, profitability calculation**: planned for
-  later phases once this core monitoring loop is proven out.
+- **Negotiation/reply drafting**: planned for later phases once this core
+  monitoring loop is proven out.
+- **Profit-based filtering**: alerts now *show* an estimated flip profit
+  (see below) but nothing is filtered on it yet - that needs real flip
+  data first to calibrate against.
 - **Playwright/browser automation**: only add this if the plain HTTP
   fetch approach in `scraper.py` stops working reliably (e.g. Marktplaats
   adds bot detection) - it's a heavier, slower fallback, not the default.
+
+## Phase 2: profit estimate in alerts
+
+Each alert now includes a best-effort flip calculation:
+
+```
+💶 Swappie resale [SWAPPIE]: €435 (Heel goed) / €425 (Redelijk) · 128GB
+🔩 Repair est. [FONEDAY]: €29.95 (screen)
+📈 Profit after repair: €155 (Good) / €145 (Fair)
+```
+
+**Profit = [SWAPPIE] resale − asking price − [FONEDAY] repair cost.**
+
+- **[SWAPPIE] resale** (`data/swappie_prices.json`): Swappie's public
+  catalog price for a refurbished phone of that model/storage, grades
+  C "Heel goed" (Good) and D "Redelijk" (Fair). That's the *retail
+  ceiling* - price a repaired flip slightly under it to sell fast.
+  Refresh with `python refresh_swappie_prices.py` (no login needed) or
+  via the weekly `refresh-swappie.yml` workflow.
+- **[FONEDAY] repair** (`data/parts_prices.yaml`): wholesale part cost
+  for the damage type detected in the listing text. Screen repairs
+  assume the OLED tier by default (`screen_repair_tier` in config.yaml,
+  switch to `screen_incell` for budget flips).
+- Listings with no asking price ("Bieden") get a **break-even max bid**
+  instead: bid above that and the flip loses money even at Fair resale.
+- Anything unparseable (unknown model, 16e/Air, missing data) just drops
+  that line from the alert - profit info never blocks a notification.
 
 ## Cost expectations
 
@@ -114,5 +144,9 @@ marktplaats_monitor/
 ├── distance.py           # Google Maps driving/transit distance
 ├── telegram_notifier.py  # sends the actual phone notifications
 ├── storage.py            # SQLite dedup tracking
+├── profit.py             # Phase 2: [SWAPPIE] resale - asking - repair
+├── refresh_swappie_prices.py  # refreshes data/swappie_prices.json
+├── refresh_prices.py     # refreshes Foneday repair-part prices
+├── data/                 # committed price data (Swappie + Foneday)
 └── seen_listings.db      # created automatically on first run
 ```

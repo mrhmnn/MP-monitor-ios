@@ -24,6 +24,7 @@ import scraper
 import filters
 import ai_classifier
 import distance
+import profit
 import telegram_notifier
 
 logging.basicConfig(
@@ -164,6 +165,14 @@ def run_scan_cycle(config: dict) -> None:
                     "reason": reason,
                     "distance_km": dist_result.distance_km,
                     "duration_minutes": dist_result.duration_minutes,
+                    # Phase 2: [SWAPPIE] resale + [FONEDAY] repair cost ->
+                    # estimated flip profit. Purely informational for now
+                    # (shown in the alert), not a filter - best-effort and
+                    # never raises.
+                    "profit_est": profit.estimate_profit(
+                        listing.title, listing.combined_text,
+                        listing.price_text, config,
+                    ),
                 }
             )
 
@@ -188,6 +197,7 @@ def run_scan_cycle(config: dict) -> None:
             distance_km=match["distance_km"],
             duration_minutes=match["duration_minutes"],
             posted_date=match["listing"].posted_date,
+            profit_est=match["profit_est"],
         )
         telegram_notifier.send_listing(match["listing"].image_url, message)
 
