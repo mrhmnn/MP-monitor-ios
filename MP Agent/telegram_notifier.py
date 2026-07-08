@@ -129,6 +129,7 @@ def format_listing_message(
     distance_km: float | None,
     duration_minutes: int | None,
     posted_date: str = "",
+    profit_est=None,  # profit.ProfitEstimate or None
 ) -> str:
     # User-written text (title, reason, price, date) gets escaped so it can
     # never break the HTML parse mode - see note at the top of this module.
@@ -146,6 +147,64 @@ def format_listing_message(
         lines.append("📍 distance unavailable")
 
     lines.append(f"🔧 {html.escape(match_reason)}")
+    lines.extend(_format_profit_lines(profit_est))
     lines.append(f'<a href="{html.escape(url, quote=True)}">Open listing</a>')
 
     return "\n".join(lines)
+
+
+def _format_profit_lines(est) -> list[str]:
+    """Phase 2 profit block. All numeric fields come from our own committed
+    data files (profit.py), so nothing here is user-written - but model
+    names are still escaped out of habit. Degrades line by line: whatever
+    number couldn't be determined is simply left out.
+
+    Example output:
+        💶 Swappie resale [SWAPPIE]: €435 (Heel goed) / €425 (Redelijk) · 128GB
+        🔩 Repair est. [FONEDAY]: €29.95 (screen)
+        📈 Profit after repair: €155 (Good) / €145 (Fair)
+    """
+    if est is None or est.model is None:
+        return []
+
+    lines = []
+
+    if est.swappie_fair is not None:
+        from profit import GRADE_LABELS  # local import avoids a cycle at module load
+
+        good_label = GRADE_LABELS.get(est.swappie_good_grade, est.swappie_good_grade)
+        fair_label = GRADE_LABELS.get(est.swappie_fair_grade, est.swappie_fair_grade)
+        parts = []
+        if est.swappie_good is not None and est.swappie_good_grade != est.swappie_fair_grade:
+            parts.append(f"€{est.swappie_good:.0f} ({html.escape(good_label)})")
+        parts.append(f"€{est.swappie_fair:.0f} ({html.escape(fair_label)})")
+        storage = f" · {est.storage_gb}GB" if est.storage_gb else ""
+        if est.storage_assumed and storage:
+            storage += " (aanname)"
+        lines.append(f"💶 Swappie resale [SWAPPIE]: {' / '.join(parts)}{storage}")
+
+    if est.repair_cost is not None:
+        parts_text = ", ".join(est.repair_parts)
+        if est.repair_assumed:
+            parts_text += " (aanname)"
+        lines.append(f"🔩 Repair est. [FONEDAY]: €{est.repair_cost:.2f} ({parts_text})")
+
+    if est.profit_fair is not None:
+        prefix = "📈" if est.profit_fair > 0 else "📉"
+        profit = f"{prefix} Profit after repair: "
+        if est.profit_good is not None and est.profit_good != est.profit_fair:
+            profit += f"€{est.profit_good:.0f} (Good) / €{est.profit_fair:.0f} (Fair)"
+        else:
+            profit += f"€{est.profit_fair:.0f}"
+        if est.asking_is_bid_floor:
+            # Asking price was a "Bieden vanaf" floor - the real purchase
+            # price will be higher, so this profit number is a ceiling.
+            profit += " (bij minimumbod)"
+        lines.append(profit)
+    elif est.break_even is not None:
+        # No asking price on the listing ("Bieden") - show the max sane
+        # bid instead: pay more than this and the flip is a loss even at
+        # Swappie's Fair resale price.
+        lines.append(f"📈 Break-even bod (max): €{est.break_even:.0f}")
+
+    return lines
