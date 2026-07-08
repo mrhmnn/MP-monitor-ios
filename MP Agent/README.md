@@ -100,25 +100,31 @@ adjust what counts as a match, an exclusion, or noise. Edit and re-run.
 Each alert now includes a best-effort flip calculation:
 
 ```
-💶 Swappie resale [SWAPPIE]: €435 (Heel goed) / €425 (Redelijk) · 128GB
+💶 Swappie betaalt [SWAPPIE]: €210 (Goed) / €195 (Matig) · 128GB
 🔩 Repair est. [FONEDAY]: €29.95 (screen)
-📈 Profit after repair: €155 (Good) / €145 (Fair)
+📈 Profit after repair: €55 (Goed) / €40 (Matig)
 ```
 
-**Profit = [SWAPPIE] resale − asking price − [FONEDAY] repair cost.**
+**Profit = [SWAPPIE] trade-in payout − asking price − [FONEDAY] repair cost.**
 
-- **[SWAPPIE] resale** (`data/swappie_prices.json`): Swappie's public
-  catalog price for a refurbished phone of that model/storage, grades
-  C "Heel goed" (Good) and D "Redelijk" (Fair). That's the *retail
-  ceiling* - price a repaired flip slightly under it to sell fast.
-  Refresh with `python refresh_swappie_prices.py` (no login needed) or
-  via the weekly `refresh-swappie.yml` workflow.
+- **[SWAPPIE] trade-in payout** (`data/swappie_prices.json`,
+  `sell_models`): what Swappie **pays you** for a fully working phone of
+  that model/storage via their verkoop flow - the same prices the
+  verkoop menu on swappie.com shows. Visual condition "Goed" (GOOD) is
+  the realistic estimate for a phone repaired with aftermarket parts,
+  "Matig" (MODERATE) the conservative floor. This is the guaranteed
+  exit, so it's what the profit math uses. The file also stores
+  Swappie's much higher *retail* prices (`models`, grades A-D) as a
+  reference ceiling for selling on Marktplaats instead - not used in
+  the calculation. Refresh with `python refresh_swappie_prices.py`
+  (no login needed) or via the weekly `refresh-swappie.yml` workflow.
 - **[FONEDAY] repair** (`data/parts_prices.yaml`): wholesale part cost
   for the damage type detected in the listing text. Screen repairs
   assume the OLED tier by default (`screen_repair_tier` in config.yaml,
   switch to `screen_incell` for budget flips).
 - Listings with no asking price ("Bieden") get a **break-even max bid**
-  instead: bid above that and the flip loses money even at Fair resale.
+  instead: bid above that and the flip loses money even at the Matig
+  payout.
 - Anything unparseable (unknown model, 16e/Air, missing data) just drops
   that line from the alert - profit info never blocks a notification.
 
@@ -144,7 +150,7 @@ marktplaats_monitor/
 ├── distance.py           # Google Maps driving/transit distance
 ├── telegram_notifier.py  # sends the actual phone notifications
 ├── storage.py            # SQLite dedup tracking
-├── profit.py             # Phase 2: [SWAPPIE] resale - asking - repair
+├── profit.py             # Phase 2: [SWAPPIE] payout - asking - repair
 ├── refresh_swappie_prices.py  # refreshes data/swappie_prices.json
 ├── refresh_prices.py     # refreshes Foneday repair-part prices
 ├── data/                 # committed price data (Swappie + Foneday)

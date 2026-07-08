@@ -1,46 +1,53 @@
 #!/usr/bin/env python
-"""Refresh [SWAPPIE] resale-price data used by the Phase 2 profit estimate.
+"""Refresh [SWAPPIE] price data used by the Phase 2 profit estimate.
 
-Swappie (swappie.com) is the biggest refurbished-iPhone shop in the EU;
-what they charge for a refurbished phone in a given condition is the
-realistic ceiling of what a repaired flip resells for, and their grade D
-("Redelijk"/Fair) price is the conservative benchmark for a quick private
-sale on Marktplaats. This pulls their public per-model catalog API:
+Two datasets, both public (no login or API key), both written to
+data/swappie_prices.json:
 
-    GET https://swappie.com/api/model/nl/{Model Name}
+1. SELL / trade-in payout ("verkoop" menu) - what Swappie PAYS you for a
+   phone. This is what the profit estimate uses: it's the guaranteed
+   exit for a repaired flip and matches the prices you see on
+   https://swappie.com/nl/verkoop-iphone/.
 
-No login or API key needed - it's the exact JSON their own product page
-preloads (found as <link href="/api/model/nl/iPhone 15" as="fetch"> on
-https://swappie.com/nl/model/iphone-15/). It returns every in-stock
-variant (grade x storage x color) with its current price in cents.
+       GET https://swappie.com/api/sell/api/v3/prices/
+           ?model_name=iPhone 14&country=NL
+           &storages=["64GB","128GB","256GB","512GB","1TB"]
 
-We keep the CHEAPEST in-stock price per grade+storage (min across colors,
-buyers don't pay a premium for color on a flip) and write:
-    data/swappie_prices.json
+   (Found in Swappie's sell-flow JS bundle; it's the call behind the
+   questionnaire.) Returns a price per storage x visual condition x set
+   of functional defects. We keep only the FULLY WORKING rows
+   (functional_condition == []) because a flip is repaired before
+   selling, per visual condition:
 
-Swappie NL condition grades:
-    A = Premium   (als nieuw / like new)
-    B = Uitstekend (excellent)
-    C = Heel goed  (good)
-    D = Redelijk   (fair)
+       LIKE_NEW   = Als nieuw     ALMOST_NEW = Bijna nieuw
+       GOOD       = Goed          MODERATE   = Matig
 
-NOTE: these are Swappie's RETAIL prices (what a buyer pays Swappie,
-incl. their 12-month warranty). What Swappie would PAY for a phone via
-their trade-in flow sits behind a session-based questionnaire with no
-public endpoint - and it's much lower anyway. For flip decisions the
-retail price is the right benchmark: price your repaired phone slightly
-under Swappie's grade C/D and it's competitive.
+   SEALED_BOX is skipped - a flip is never sealed.
+
+2. RETAIL catalog price - what a buyer pays Swappie for a refurbished
+   phone (incl. 12-month warranty). Kept as a reference ceiling for
+   pricing a flip on Marktplaats, NOT used in the profit math.
+
+       GET https://swappie.com/api/model/nl/{Model Name}
+
+   Cheapest in-stock variant per grade+storage (min across colors).
+   Grades: A = Premium, B = Uitstekend, C = Heel goed, D = Redelijk.
 
 Run:  python refresh_swappie_prices.py     (from the "MP Agent" directory)
 """
 import datetime
 import json
+import re
 import sys
 from pathlib import Path
 
 import httpx
 
 API = "https://swappie.com/api/model/nl/{model}"
+SELL_API = "https://swappie.com/api/sell/api/v3/prices/"
+# Every storage Swappie has ever sold for these generations; the API
+# silently ignores sizes a model doesn't come in.
+SELL_STORAGES = ["64GB", "128GB", "256GB", "512GB", "1TB"]
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
@@ -56,6 +63,11 @@ MODELS = [
 
 GRADE_LABELS = {"A": "Premium (als nieuw)", "B": "Uitstekend",
                 "C": "Heel goed", "D": "Redelijk"}
+
+SELL_CONDITION_LABELS = {"LIKE_NEW": "Als nieuw", "ALMOST_NEW": "Bijna nieuw",
+                         "GOOD": "Goed", "MODERATE": "Matig"}
+
+_SELL_STORAGE_RE = re.compile(r"(\d+)\s?(GB|TB)\s*$", re.IGNORECASE)
 
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -82,37 +94,81 @@ def fetch_model(client: httpx.Client, model: str) -> dict:
     return by_storage
 
 
+def fetch_sell_prices(client: httpx.Client, model: str) -> dict:
+    """Return {storage(str): {visual_condition: payout_eur}} for one model.
+
+    Only fully working rows (no functional defects) - the flip is repaired
+    before it's sold to Swappie, so that's the payout that applies.
+    """
+    r = client.get(SELL_API, params={
+        "model_name": model,
+        "country": "NL",
+        "storages": json.dumps(SELL_STORAGES),
+    })
+    r.raise_for_status()
+    rows = r.json().get("results", [])
+
+    by_storage: dict = {}
+    for row in rows:
+        if row.get("functional_condition"):     # has defects - not our exit
+            continue
+        cond = row.get("visual_condition")
+        if cond not in SELL_CONDITION_LABELS:   # skips SEALED_BOX etc.
+            continue
+        m = _SELL_STORAGE_RE.search(row.get("model_name", ""))
+        price = (row.get("price") or {}).get("price")
+        if not (m and price):
+            continue
+        gb = int(m.group(1)) * (1024 if m.group(2).upper() == "TB" else 1)
+        by_storage.setdefault(str(gb), {})[cond] = float(price)
+    return by_storage
+
+
 def main() -> None:
-    out = {}
+    retail, sell = {}, {}
     with httpx.Client(headers={"User-Agent": UA, "Accept": "application/json"},
                       timeout=30) as client:
         for model in MODELS:
             try:
                 by_storage = fetch_model(client, model)
             except httpx.HTTPError as exc:
-                print(f"  {model:<22} FAILED: {exc}", file=sys.stderr)
-                continue
-            n = sum(len(g) for g in by_storage.values())
-            print(f"  {model:<22} {len(by_storage)} storages, "
-                  f"{n} grade prices", file=sys.stderr)
+                print(f"  {model:<22} retail FAILED: {exc}", file=sys.stderr)
+                by_storage = {}
+            try:
+                sell_by_storage = fetch_sell_prices(client, model)
+            except httpx.HTTPError as exc:
+                print(f"  {model:<22} sell FAILED: {exc}", file=sys.stderr)
+                sell_by_storage = {}
+            print(f"  {model:<22} retail: {len(by_storage)} storages, "
+                  f"sell: {len(sell_by_storage)} storages", file=sys.stderr)
             if by_storage:
-                out[model.lower()] = by_storage
+                retail[model.lower()] = by_storage
+            if sell_by_storage:
+                sell[model.lower()] = sell_by_storage
 
     payload = {
         "meta": {
             "generated": datetime.date.today().isoformat(),
-            "source": "swappie.com/api/model/nl (public catalog API) [SWAPPIE]",
+            "source": "swappie.com public APIs [SWAPPIE]: "
+                      "/api/sell/api/v3/prices/ (trade-in payout) + "
+                      "/api/model/nl (retail catalog)",
             "currency": "EUR",
-            "price_kind": "Swappie RETAIL price (refurbished, 12mo warranty), "
-                          "cheapest in-stock variant per grade+storage",
-            "grades": GRADE_LABELS,
+            "sell_price_kind": "what Swappie PAYS for a fully working phone "
+                               "(verkoop/trade-in flow), per visual condition",
+            "sell_conditions": SELL_CONDITION_LABELS,
+            "retail_price_kind": "Swappie RETAIL price (refurbished, 12mo "
+                                 "warranty), cheapest in-stock variant per "
+                                 "grade+storage - reference ceiling only",
+            "retail_grades": GRADE_LABELS,
         },
-        "models": out,
+        "sell_models": sell,
+        "models": retail,
     }
     path = DATA_DIR / "swappie_prices.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=1),
                     encoding="utf-8")
-    print(f"Wrote {path} ({len(out)}/{len(MODELS)} models)", file=sys.stderr)
+    print(f"Wrote {path} (sell: {len(sell)}/{len(MODELS)}, "
+          f"retail: {len(retail)}/{len(MODELS)} models)", file=sys.stderr)
 
 
 if __name__ == "__main__":

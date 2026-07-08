@@ -3,16 +3,22 @@ profit.py
 
 Phase 2 profit estimate for a matched listing:
 
-    profit = [SWAPPIE] resale price - asking price - [FONEDAY] repair cost
+    profit = [SWAPPIE] trade-in payout - asking price - [FONEDAY] repair cost
 
 Data sources (both committed files under data/, refreshed by their own
 scripts, NOT fetched live during a scan - a scan must never fail or slow
 down because a pricing site is unreachable):
 
-  data/swappie_prices.json   [SWAPPIE] retail price per model/storage/grade
-                             (refresh_swappie_prices.py). Grade C = "Heel
-                             goed" (Good), grade D = "Redelijk" (Fair) -
-                             the realistic resale range for a repaired flip.
+  data/swappie_prices.json   [SWAPPIE] "sell_models": what Swappie PAYS
+                             for a fully working phone via their verkoop
+                             (trade-in) flow, per model/storage/visual
+                             condition (refresh_swappie_prices.py). This
+                             is the guaranteed exit for a repaired flip -
+                             matches the prices in the verkoop menu on
+                             swappie.com. (The file also carries Swappie's
+                             much higher RETAIL prices under "models";
+                             those are a Marktplaats pricing reference
+                             only and NOT used here.)
   data/parts_prices.yaml     [FONEDAY] wholesale repair-part cost per
                              model/category (refresh_prices.py).
 
@@ -34,17 +40,20 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).parent / "data"
 
-# --- Swappie grade semantics -------------------------------------------------
-# Swappie NL sells refurbished phones in four grades:
-#   A = Premium (als nieuw)   B = Uitstekend   C = Heel goed   D = Redelijk
-# A phone we repaired with aftermarket parts realistically competes with
-# Swappie's C ("Good") at best, and D ("Fair") is the conservative floor.
-# If the exact grade is out of stock at Swappie, fall back to the nearest
-# grade so a sparse model (e.g. a just-released generation) still gets an
-# estimate - the grade actually used is reported in the result.
-GRADE_GOOD_FALLBACK = ["C", "B", "D", "A"]
-GRADE_FAIR_FALLBACK = ["D", "C", "B", "A"]
-GRADE_LABELS = {"A": "Premium", "B": "Uitstekend", "C": "Heel goed", "D": "Redelijk"}
+# --- Swappie trade-in condition semantics -------------------------------------
+# Swappie's verkoop (sell-to-Swappie) flow prices a fully working phone by
+# visual condition:
+#   LIKE_NEW = Als nieuw   ALMOST_NEW = Bijna nieuw   GOOD = Goed
+#   MODERATE = Matig
+# A phone we repaired with aftermarket parts realistically passes as GOOD
+# at best; MODERATE is the conservative floor (Swappie grades visuals
+# strictly). If a condition is missing for a model, fall back to the
+# nearest one so a sparse model still gets an estimate - the condition
+# actually used is reported in the result.
+GRADE_GOOD_FALLBACK = ["GOOD", "MODERATE", "ALMOST_NEW", "LIKE_NEW"]
+GRADE_FAIR_FALLBACK = ["MODERATE", "GOOD", "ALMOST_NEW", "LIKE_NEW"]
+GRADE_LABELS = {"LIKE_NEW": "Als nieuw", "ALMOST_NEW": "Bijna nieuw",
+                "GOOD": "Goed", "MODERATE": "Matig"}
 
 # --- Damage-category inference ----------------------------------------------
 # Maps Dutch damage vocabulary (the same vocabulary config.yaml's keyword
@@ -82,10 +91,10 @@ class ProfitEstimate:
     model: Optional[str] = None            # "iphone 15 pro max" (lowercase key)
     storage_gb: Optional[int] = None       # storage used for the lookup
     storage_assumed: bool = False          # True if title didn't state storage
-    swappie_good: Optional[float] = None   # [SWAPPIE] resale, Good condition
-    swappie_good_grade: str = ""           # grade actually used (normally C)
-    swappie_fair: Optional[float] = None   # [SWAPPIE] resale, Fair condition
-    swappie_fair_grade: str = ""           # grade actually used (normally D)
+    swappie_good: Optional[float] = None   # [SWAPPIE] payout, Goed condition
+    swappie_good_grade: str = ""           # condition used (normally GOOD)
+    swappie_fair: Optional[float] = None   # [SWAPPIE] payout, Matig condition
+    swappie_fair_grade: str = ""           # condition used (normally MODERATE)
     repair_cost: Optional[float] = None    # [FONEDAY] parts total
     repair_parts: list[str] = field(default_factory=list)
     repair_assumed: bool = False           # True if damage type defaulted to screen
@@ -105,7 +114,8 @@ def _load_swappie() -> dict:
     if _swappie_cache is None:
         try:
             path = DATA_DIR / "swappie_prices.json"
-            _swappie_cache = json.loads(path.read_text(encoding="utf-8")).get("models", {})
+            _swappie_cache = json.loads(path.read_text(encoding="utf-8")).get(
+                "sell_models", {})
         except Exception as exc:  # noqa: BLE001
             logger.error("Could not load swappie_prices.json: %s", exc)
             _swappie_cache = {}
@@ -191,15 +201,15 @@ def _estimate(title: str, combined_text: str, price_text: str,
 
     est.asking_price, est.asking_is_bid_floor = parse_asking_price(price_text)
 
-    # --- [SWAPPIE] resale lookup ---
+    # --- [SWAPPIE] trade-in payout lookup ---
     swappie_model = _load_swappie().get(est.model, {})
     if swappie_model:
         storage = parse_storage(title) or parse_storage(combined_text)
         if storage is None or str(storage) not in swappie_model:
-            # No storage stated (or a size Swappie doesn't stock for this
-            # model): assume the SMALLEST tier Swappie sells - damaged
+            # No storage stated (or a size Swappie doesn't buy for this
+            # model): assume the SMALLEST tier Swappie prices - damaged
             # Marktplaats phones skew base-storage, and assuming small
-            # keeps the resale estimate conservative.
+            # keeps the payout estimate conservative.
             est.storage_assumed = True
             storage = min(int(s) for s in swappie_model)
         est.storage_gb = storage

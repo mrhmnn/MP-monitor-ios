@@ -160,9 +160,13 @@ def _format_profit_lines(est) -> list[str]:
     number couldn't be determined is simply left out.
 
     Example output:
-        💶 Swappie resale [SWAPPIE]: €435 (Heel goed) / €425 (Redelijk) · 128GB
+        💶 Swappie betaalt [SWAPPIE]: €210 (Goed) / €195 (Matig) · 128GB
         🔩 Repair est. [FONEDAY]: €29.95 (screen)
-        📈 Profit after repair: €155 (Good) / €145 (Fair)
+        📈 Profit after repair: €55 (Goed) / €40 (Matig)
+
+    "Swappie betaalt" is the trade-in payout (verkoop flow) for a fully
+    working phone - the guaranteed exit after repair - not their much
+    higher retail price.
     """
     if est is None or est.model is None:
         return []
@@ -181,7 +185,7 @@ def _format_profit_lines(est) -> list[str]:
         storage = f" · {est.storage_gb}GB" if est.storage_gb else ""
         if est.storage_assumed and storage:
             storage += " (aanname)"
-        lines.append(f"💶 Swappie resale [SWAPPIE]: {' / '.join(parts)}{storage}")
+        lines.append(f"💶 Swappie betaalt [SWAPPIE]: {' / '.join(parts)}{storage}")
 
     if est.repair_cost is not None:
         parts_text = ", ".join(est.repair_parts)
@@ -193,7 +197,7 @@ def _format_profit_lines(est) -> list[str]:
         prefix = "📈" if est.profit_fair > 0 else "📉"
         profit = f"{prefix} Profit after repair: "
         if est.profit_good is not None and est.profit_good != est.profit_fair:
-            profit += f"€{est.profit_good:.0f} (Good) / €{est.profit_fair:.0f} (Fair)"
+            profit += f"€{est.profit_good:.0f} (Goed) / €{est.profit_fair:.0f} (Matig)"
         else:
             profit += f"€{est.profit_fair:.0f}"
         if est.asking_is_bid_floor:
@@ -204,7 +208,7 @@ def _format_profit_lines(est) -> list[str]:
     elif est.break_even is not None:
         # No asking price on the listing ("Bieden") - show the max sane
         # bid instead: pay more than this and the flip is a loss even at
-        # Swappie's Fair resale price.
+        # Swappie's Matig trade-in payout.
         lines.append(f"📈 Break-even bod (max): €{est.break_even:.0f}")
 
     return lines
