@@ -129,10 +129,11 @@ def format_listing_message(
     distance_km: float | None,
     duration_minutes: int | None,
     posted_date: str = "",
-    profit_est=None,  # profit.ProfitEstimate or None
+    city: str = "",
+    repair_est=None,  # repair.RepairEstimate or None
 ) -> str:
-    # User-written text (title, reason, price, date) gets escaped so it can
-    # never break the HTML parse mode - see note at the top of this module.
+    # User-written text (title, reason, price, date, city) gets escaped so it
+    # can never break the HTML parse mode - see note at the top of this module.
     lines = [f"<b>{html.escape(title)}</b>", f"💰 {html.escape(price_text or 'Bieden')}"]
 
     if posted_date:
@@ -141,74 +142,38 @@ def format_listing_message(
         # date - not the bump/repost date shown in search results.
         lines.append(f"🗓️ {html.escape(posted_date)}")
 
+    city_prefix = f"{html.escape(city)} · " if city else ""
     if distance_km is not None and duration_minutes is not None:
-        lines.append(f"📍 {distance_km:.0f} km · 🚗 ~{duration_minutes} min from Veenendaal")
+        lines.append(
+            f"📍 {city_prefix}{distance_km:.0f} km · 🚗 ~{duration_minutes} min from Veenendaal"
+        )
     else:
-        lines.append("📍 distance unavailable")
+        # City matters MOST here: with no computed distance, the name is
+        # the only clue whether the listing is worth a manual look.
+        lines.append(f"📍 {city_prefix}distance unavailable")
 
     lines.append(f"🔧 {html.escape(match_reason)}")
-    lines.extend(_format_profit_lines(profit_est))
+    repair_line = _format_repair_line(repair_est)
+    if repair_line:
+        lines.append(repair_line)
     lines.append(f'<a href="{html.escape(url, quote=True)}">Open listing</a>')
 
     return "\n".join(lines)
 
 
-def _format_profit_lines(est) -> list[str]:
-    """Phase 2 profit block. All numeric fields come from our own committed
-    data files (profit.py), so nothing here is user-written - but model
-    names are still escaped out of habit. Degrades line by line: whatever
-    number couldn't be determined is simply left out.
+def _format_repair_line(est) -> str:
+    """[FONEDAY] repair-cost line, e.g.:
 
-    Example output:
-        💶 Swappie betaalt [SWAPPIE]: €210 (Goed) / €195 (Matig) · 128GB
         🔩 Repair est. [FONEDAY]: €29.95 (screen)
-        📈 Profit after repair: €55 (Goed) / €40 (Matig)
 
-    "Swappie betaalt" is the trade-in payout (verkoop flow) for a fully
-    working phone - the guaranteed exit after repair - not their much
-    higher retail price.
+    Numbers come from our own committed data file (repair.py). Returns ""
+    when no estimate could be made - the alert simply omits the line.
+    (The Swappie payout/profit lines that used to follow this one were
+    removed 2026-07-10: too much noise per alert.)
     """
-    if est is None or est.model is None:
-        return []
-
-    lines = []
-
-    if est.swappie_fair is not None:
-        from profit import GRADE_LABELS  # local import avoids a cycle at module load
-
-        good_label = GRADE_LABELS.get(est.swappie_good_grade, est.swappie_good_grade)
-        fair_label = GRADE_LABELS.get(est.swappie_fair_grade, est.swappie_fair_grade)
-        parts = []
-        if est.swappie_good is not None and est.swappie_good_grade != est.swappie_fair_grade:
-            parts.append(f"€{est.swappie_good:.0f} ({html.escape(good_label)})")
-        parts.append(f"€{est.swappie_fair:.0f} ({html.escape(fair_label)})")
-        storage = f" · {est.storage_gb}GB" if est.storage_gb else ""
-        if est.storage_assumed and storage:
-            storage += " (aanname)"
-        lines.append(f"💶 Swappie betaalt [SWAPPIE]: {' / '.join(parts)}{storage}")
-
-    if est.repair_cost is not None:
-        parts_text = ", ".join(est.repair_parts)
-        if est.repair_assumed:
-            parts_text += " (aanname)"
-        lines.append(f"🔩 Repair est. [FONEDAY]: €{est.repair_cost:.2f} ({parts_text})")
-
-    if est.profit_fair is not None:
-        prefix = "📈" if est.profit_fair > 0 else "📉"
-        profit = f"{prefix} Profit after repair: "
-        if est.profit_good is not None and est.profit_good != est.profit_fair:
-            profit += f"€{est.profit_good:.0f} (Goed) / €{est.profit_fair:.0f} (Matig)"
-        else:
-            profit += f"€{est.profit_fair:.0f}"
-        if est.asking_is_bid_floor:
-            # Asking price was a "Bieden vanaf" floor - the real purchase
-            # price will be higher, so this profit number is a ceiling.
-            profit += " (bij minimumbod)"
-        lines.append(profit)
-    elif est.break_even is not None:
-        # No asking price on the listing ("Bieden") - show the max sane
-        # bid instead: pay more than this and the flip is a loss even at
-        # Swappie's Matig trade-in payout.
-        lines.append(f"📈 Break-even bod (max): €{est.break_even:.0f}")
-
-    return lines
+    if est is None or est.repair_cost is None:
+        return ""
+    parts_text = ", ".join(est.repair_parts)
+    if est.repair_assumed:
+        parts_text += " (aanname)"
+    return f"🔩 Repair est. [FONEDAY]: €{est.repair_cost:.2f} ({parts_text})"

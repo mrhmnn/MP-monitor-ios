@@ -272,16 +272,15 @@ max_distance_km: 200
 reject_seller_with_website: true
 reject_priority_listings: true
 
-# --- Phase 2 profit estimate ---
+# --- Repair-cost estimate (shown in alerts as bidding context) ---
 # Which Foneday screen tier the repair-cost estimate assumes when the
 # damage is a broken screen:
 #   screen_oled   - OLED panel, looks like original, safer resale (default:
-#                   conservative, keeps the profit estimate honest)
+#                   conservative, keeps the estimate honest)
 #   screen_incell - cheap aftermarket in-cell, ~half the price, budget flips
-# Resale side is Swappie's trade-in payout - what their verkoop flow pays
-# for a fully working phone (data/swappie_prices.json "sell_models",
-# refresh with: python refresh_swappie_prices.py). Repair side is Foneday
-# wholesale (data/parts_prices.yaml, refresh with: python refresh_prices.py).
+# Prices are Foneday wholesale (data/parts_prices.yaml, refresh with:
+# python refresh_prices.py). The Swappie payout/profit side was removed
+# 2026-07-10 (too much alert noise) - git history has it if ever needed.
 screen_repair_tier: "screen_oled"
 
 # --- AI classifier ---
