@@ -16,11 +16,13 @@ in `_parse_html_fallback()` once against the live page:
   4. Update SELECTORS below to match
 
 Strategy used:
-  A) Try to find embedded JSON data in a <script> tag (many modern sites,
-     including Marktplaats' Next.js-based frontend, embed a JSON blob with
-     the full listing dataset - this is far more reliable than CSS
-     selectors since it doesn't break when they restyle the page).
-  B) If that fails, fall back to HTML/CSS parsing.
+  A) Marktplaats' internal LRP search API (/lrp/api/search) - the same
+     JSON endpoint their frontend uses. Crucially, it's the only path
+     that honors date-desc sorting, so it returns the genuinely NEWEST
+     30 listings per query (verified live 2026-07-10).
+  B) If that fails: embedded __NEXT_DATA__ JSON blob from the HTML search
+     page (same item shape as A, but relevance-sorted).
+  C) If that also fails: HTML/CSS selector parsing.
 
 Run `python scraper.py` directly (see bottom of file) to sanity-check
 extraction against a live URL before wiring it into main.py.
@@ -193,12 +195,115 @@ def _extract_listing_id_from_url(url: str) -> str:
     return url
 
 
+def _listing_from_item(item: dict) -> Listing:
+    """
+    Build a Listing from one Marktplaats listing-JSON item. The exact same
+    item shape appears in two places (verified live 2026-07-10): the LRP
+    search API response (`/lrp/api/search` -> "listings") and the
+    __NEXT_DATA__ blob embedded in the HTML search page - so both
+    strategies share this parser.
+    """
+    url = item.get("vipUrl", item.get("url", ""))
+    if url and not url.startswith("http"):
+        url = "https://www.marktplaats.nl" + url
+
+    location = item.get("location", {}) if isinstance(item.get("location"), dict) else {}
+
+    # Extract first image URL. Marktplaats provides multiple size
+    # variants in the `pictures` array; the "large" one is a good
+    # quality/size balance for Telegram (under Telegram's ~5MB
+    # sendPhoto limit while still readable on a phone screen).
+    image_url = ""
+    pictures = item.get("pictures", [])
+    if pictures and isinstance(pictures, list):
+        first_pic = pictures[0]
+        if isinstance(first_pic, dict):
+            image_url = (
+                first_pic.get("largeUrl")
+                or first_pic.get("mediumUrl")
+                or first_pic.get("extraExtraLargeUrl")
+                or ""
+            )
+    # Fallback to imageUrls if pictures didn't yield anything
+    if not image_url:
+        image_urls = item.get("imageUrls", [])
+        if image_urls and isinstance(image_urls, list):
+            raw = image_urls[0]
+            # imageUrls entries often start with "//" - add scheme
+            if raw.startswith("//"):
+                image_url = "https:" + raw
+            elif raw.startswith("http"):
+                image_url = raw
+
+    seller = item.get("sellerInformation", {}) if isinstance(item.get("sellerInformation"), dict) else {}
+
+    return Listing(
+        listing_id=str(item.get("itemId", item.get("id", ""))),
+        title=item.get("title", ""),
+        description_snippet=item.get("description", ""),
+        price_text=_format_price(item.get("priceInfo")),
+        location_text=location.get("cityName", ""),
+        url=url,
+        posted_date=item.get("date", ""),
+        latitude=location.get("latitude"),
+        longitude=location.get("longitude"),
+        image_url=image_url,
+        seller_name=seller.get("sellerName", ""),
+        seller_has_website=bool(seller.get("showWebsiteUrl", False)),
+        priority_product=item.get("priorityProduct", "NONE") or "NONE",
+    )
+
+
+# Marktplaats' internal search API - the same one their frontend calls when
+# you change the sort order in the browser. Unlike the HTML search page
+# (whose #Sort fragment never reaches the server, so it's always
+# relevance-sorted), this endpoint honors sortBy/sortOrder and returns true
+# newest-first results. No auth needed. Category IDs match the
+# telecommunicatie / mobiele-telefoons-apple-iphone path baked into
+# base_search_url. Verified live 2026-07-10.
+LRP_API_URL = "https://www.marktplaats.nl/lrp/api/search"
+LRP_L1_CATEGORY_ID = 820   # telecommunicatie
+LRP_L2_CATEGORY_ID = 1953  # mobiele-telefoons-apple-iphone
+
+
+def _fetch_listings_api(query: str, user_agent: str, timeout: float = 15.0) -> list[Listing]:
+    """Strategy A: LRP search API, sorted newest-first."""
+    params = {
+        "query": query,
+        "l1CategoryId": str(LRP_L1_CATEGORY_ID),
+        "l2CategoryId": str(LRP_L2_CATEGORY_ID),
+        "sortBy": "SORT_INDEX",
+        "sortOrder": "DECREASING",
+        "limit": "30",
+        "offset": "0",
+    }
+    client = _get_http_client(user_agent, timeout)
+    try:
+        resp = client.get(LRP_API_URL, params=params)
+        resp.raise_for_status()
+    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+        # Same one-retry-on-transient-failure policy as fetch_page().
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+            raise
+        logger.warning("LRP API fetch failed for '%s' (%s), retrying once", query, exc)
+        resp = client.get(LRP_API_URL, params=params)
+        resp.raise_for_status()
+
+    items = resp.json().get("listings", [])
+    listings: list[Listing] = []
+    for item in items:
+        try:
+            listings.append(_listing_from_item(item))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Skipping malformed API listing item: %s", exc)
+    return listings
+
+
 def _parse_json_blob(html: str) -> list[Listing]:
     """
-    Strategy A: look for an embedded JSON script tag with listing data.
-    This is a best-effort attempt - the exact script id/shape may have
-    changed by the time you run this. If it returns an empty list, the
-    HTML fallback below will be used instead.
+    Strategy B: look for an embedded JSON script tag with listing data in
+    the HTML search page. NOTE: this page is relevance-sorted, not
+    newest-first - it's only used when the LRP API call fails.
     """
     listings: list[Listing] = []
     soup = BeautifulSoup(html, "html.parser")
@@ -213,10 +318,6 @@ def _parse_json_blob(html: str) -> list[Listing]:
         logger.debug("Found __NEXT_DATA__ but couldn't parse as JSON")
         return listings
 
-    # NOTE: the exact path into this dict WILL need adjustment - this is a
-    # placeholder based on typical Next.js listing-page shapes. Print
-    # `data` (or dump to a file) the first time you run this to find the
-    # real path to the listings array.
     try:
         search_results = (
             data.get("props", {})
@@ -229,57 +330,7 @@ def _parse_json_blob(html: str) -> list[Listing]:
 
     for item in search_results:
         try:
-            url = item.get("vipUrl", item.get("url", ""))
-            if url and not url.startswith("http"):
-                url = "https://www.marktplaats.nl" + url
-
-            location = item.get("location", {}) if isinstance(item.get("location"), dict) else {}
-
-            # Extract first image URL. Marktplaats provides multiple size
-            # variants in the `pictures` array; the "large" one is a good
-            # quality/size balance for Telegram (under Telegram's ~5MB
-            # sendPhoto limit while still readable on a phone screen).
-            image_url = ""
-            pictures = item.get("pictures", [])
-            if pictures and isinstance(pictures, list):
-                first_pic = pictures[0]
-                if isinstance(first_pic, dict):
-                    image_url = (
-                        first_pic.get("largeUrl")
-                        or first_pic.get("mediumUrl")
-                        or first_pic.get("extraExtraLargeUrl")
-                        or ""
-                    )
-            # Fallback to imageUrls if pictures didn't yield anything
-            if not image_url:
-                image_urls = item.get("imageUrls", [])
-                if image_urls and isinstance(image_urls, list):
-                    raw = image_urls[0]
-                    # imageUrls entries often start with "//" - add scheme
-                    if raw.startswith("//"):
-                        image_url = "https:" + raw
-                    elif raw.startswith("http"):
-                        image_url = raw
-
-            seller = item.get("sellerInformation", {}) if isinstance(item.get("sellerInformation"), dict) else {}
-
-            listings.append(
-                Listing(
-                    listing_id=str(item.get("itemId", item.get("id", ""))),
-                    title=item.get("title", ""),
-                    description_snippet=item.get("description", ""),
-                    price_text=_format_price(item.get("priceInfo")),
-                    location_text=location.get("cityName", ""),
-                    url=url,
-                    posted_date=item.get("date", ""),
-                    latitude=location.get("latitude"),
-                    longitude=location.get("longitude"),
-                    image_url=image_url,
-                    seller_name=seller.get("sellerName", ""),
-                    seller_has_website=bool(seller.get("showWebsiteUrl", False)),
-                    priority_product=item.get("priorityProduct", "NONE") or "NONE",
-                )
-            )
+            listings.append(_listing_from_item(item))
         except Exception as exc:  # noqa: BLE001
             logger.debug("Skipping malformed JSON listing item: %s", exc)
 
@@ -311,7 +362,7 @@ def _format_price(price_info) -> str:
 
 
 def _parse_html_fallback(html: str) -> list[Listing]:
-    """Strategy B: plain CSS-selector based scraping. See SELECTORS above."""
+    """Strategy C: plain CSS-selector based scraping. See SELECTORS above."""
     listings: list[Listing] = []
     soup = BeautifulSoup(html, "html.parser")
 
@@ -347,6 +398,20 @@ def _parse_html_fallback(html: str) -> list[Listing]:
 
 
 def fetch_listings(query: str, base_url_template: str, user_agent: str) -> list[Listing]:
+    # Strategy A: LRP API - the only path that's genuinely newest-first.
+    # The HTML strategies below are relevance-sorted (the #Sort fragment in
+    # base_search_url never reaches the server), which silently misses
+    # fresh listings that rank poorly on relevance - so they're kept
+    # strictly as a fallback for when Marktplaats changes/blocks the API.
+    try:
+        listings = _fetch_listings_api(query, user_agent)
+        if listings:
+            logger.info("Extracted %d listings via LRP API (date-desc)", len(listings))
+            return listings
+        logger.warning("LRP API returned 0 listings for '%s', trying HTML fallback", query)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("LRP API failed for '%s' (%s), trying HTML fallback", query, exc)
+
     url = build_search_url(base_url_template, query)
     logger.info("Fetching: %s", url)
     html = fetch_page(url, user_agent)

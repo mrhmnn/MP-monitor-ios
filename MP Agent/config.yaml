@@ -2,8 +2,10 @@
 # Secrets (API keys, tokens) go in .env, NOT here. This file is safe to commit to git.
 
 # --- Search setup ---
-# Marktplaats' search returns 30 listings per query, sorted newest-first.
-# We use a mix of:
+# Each query pulls the newest ~30 listings via Marktplaats' internal LRP
+# search API (true date-desc sorting - the old HTML page was relevance-
+# sorted despite the #Sort fragment, which browsers never send to the
+# server). We use a mix of:
 #   - Broad damage-term queries (catch matches across all model generations)
 #   - Model-specific queries (catch fresh listings that would otherwise get
 #     pushed off the newest-30 list by higher-volume broad-term results)
@@ -39,7 +41,24 @@ search_queries:
   - "iphone touchscreen kapot"
   - "iphone valschade"
   - "iphone gebutst"
+  # Added 2026-07-10 — "schade" is the single most common Dutch damage word
+  # and had NO query at all. Found in production: "Apple iPhone 15 128GB
+  # Groen *Schade*" (m2419022529) was invisible to every query above -
+  # verified live that only "schade" queries surface it. Broad + per-model,
+  # same pattern as kapot/defect.
+  - "iphone schade"
+  - "iphone 14 schade"
+  - "iphone 15 schade"
+  - "iphone 16 schade"
+  - "iphone 17 schade"
+  # Common seller typo of "beschadigd" - Marktplaats search does no
+  # stemming, so "iphone beschadigd"-style queries never match it (the
+  # m2419022529 listing wrote "Achterkant is beschadigt", verified live).
+  - "iphone beschadigt"
 
+# HTML search page - FALLBACK ONLY, used when the LRP API call fails.
+# Note: the #Sort fragment is client-side only, so this fallback returns
+# relevance-sorted results, not newest-first. Better than nothing.
 base_search_url: "https://www.marktplaats.nl/l/telecommunicatie/mobiele-telefoons-apple-iphone/q/{query}/#Sort:SortIndex|dateDesc"
 
 # --- Model filter (checked against TITLE only) ---
@@ -178,6 +197,9 @@ ambiguous_terms:
   - "gebutst"
   - "deuk"
   - "beschadigd"   # bare, unqualified — could be screen/back/case/cosmetic-only
+  - "beschadigt"   # common typo of "beschadigd" seen in production (m2419022529)
+  - "schade"       # bare, unqualified — subsumes lichte/kleine/val-schade above;
+                   # "geen schade" negation still short-circuits it for free
 
 # --- Negation phrases: if any appear, skip AI review entirely (free filter) ---
 # Prevents wasting API calls on listings where the seller is actively
