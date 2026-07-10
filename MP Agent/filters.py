@@ -43,6 +43,32 @@ def matches_target_model(text: str, target_models: list[str]) -> bool:
     return _contains_any(text, target_models) is not None
 
 
+# Catches titles that name a generation number + phone-spec qualifier
+# (Pro/Plus/Max/storage size) without ever writing the word "iPhone" -
+# e.g. "3x 17 Pro en 4x 17 256 gb met kapotte displays" (real production
+# miss: seller assumed the Apple iPhone category made it obvious). Requires
+# a qualifier alongside the bare number so it doesn't fire on any random
+# "14"-"17" digit; the description check in matches_target_model_fallback
+# is what actually keeps this safe from false-matching unrelated listings.
+_BARE_MODEL_RE = re.compile(
+    r"\b1[4-7]\b[^\d]{0,15}?(pro\s*max|pro|plus|max|\d{2,4}\s*gb|\d{2,4}gb)",
+    re.IGNORECASE,
+)
+
+
+def matches_target_model_fallback(title: str, description: str) -> bool:
+    """
+    Fallback for bare-number titles (no "iPhone" in the title at all).
+    Only trusts the bare-number regex if the description INDEPENDENTLY
+    confirms "iphone" - that's what stops this from false-matching some
+    unrelated "17 Pro" or "16 Plus" product that happens to share the
+    category page, since the bare regex alone is deliberately loose.
+    """
+    if not _BARE_MODEL_RE.search(title):
+        return False
+    return "iphone" in description.lower()
+
+
 def is_business_listing(text: str, indicators: list[str], threshold: int) -> bool:
     return _count_matches(text, indicators) >= threshold
 
@@ -93,8 +119,14 @@ def evaluate_listing(
     still use the full combined text, since that detail often lives in
     the description.
 
-    Same title-only rule applies to title_model_excludes (iPhone Air) -
-    only the title determines model identity.
+    Exception: matches_target_model_fallback() - if the title has zero
+    "iphone" substring but names a bare generation number with a phone-spec
+    qualifier (e.g. "17 Pro", "17 256 gb"), the description is checked for
+    an independent "iphone" confirmation. Found in production: a bulk-lot
+    listing titled "3x 17 Pro en 4x 17 256 gb met kapotte displays" never
+    said "iPhone" anywhere in the title, relying on the Apple iPhone
+    category to make it obvious - matches_target_model() alone silently
+    dropped it every scan.
 
     `seller_has_website` / `priority_product` come from Marktplaats' own
     structured listing data (scraper.Listing) - much stronger business
@@ -105,19 +137,8 @@ def evaluate_listing(
     combined_text = f"{title} {description}".lower()
 
     if not matches_target_model(title_lower, config["target_models"]):
-        return FilterResult(accepted=False, reason="not a target model (14-17) in title")
-
-    # Configurable title-level model exclusions (e.g. "iphone air").
-    excluded_model = _contains_any(title_lower, config.get("title_model_excludes", []))
-    if excluded_model:
-        return FilterResult(accepted=False, reason=f"excluded model in title: '{excluded_model}'")
-
-    # Also reject iPhone Air listings via regex, since Apple's naming is
-    # "iPhone 17 Air" (generation number in between) - a plain substring
-    # entry like "iphone air" can't catch that. \b ensures we don't
-    # accidentally match "airbag" or similar words.
-    if re.search(r"\biphone\b.*\bair\b", title_lower):
-        return FilterResult(accepted=False, reason="excluded model: iPhone Air variant")
+        if not matches_target_model_fallback(title_lower, description):
+            return FilterResult(accepted=False, reason="not a target model (14-17) in title")
 
     # Structured business-seller signals from Marktplaats' own data:
     # a seller with a linked business website is a shop by definition, and

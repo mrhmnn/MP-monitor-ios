@@ -47,8 +47,10 @@ base_search_url: "https://www.marktplaats.nl/l/telecommunicatie/mobiele-telefoon
 # substring of "iphone 14 pro" and "iphone 14 pro max" and "iphone 14 plus",
 # a single base-model entry catches all variants of that generation - no
 # need to enumerate all four variants explicitly. Covers 14, 15, 16, 17
-# and all their Pro/Plus/Pro Max variants. iPhone Air is explicitly
-# excluded via title_model_excludes below.
+# and all their Pro/Plus/Pro Max variants.
+# "iph" entries cover the common Marktplaats abbreviation (e.g. "IPH 14
+# Pro Max scherm kapot") - sellers use this constantly and it was missing
+# entirely before, silently dropping every "iph"-titled listing.
 target_models:
   - "iphone 14"
   - "iphone14"
@@ -58,15 +60,14 @@ target_models:
   - "iphone16"
   - "iphone 17"
   - "iphone17"
-
-# --- Model exclusions (checked against TITLE only) ---
-# Even if a listing matches a target_models entry, if its title also
-# contains one of these, it's rejected. Used to exclude iPhone Air, since
-# "iphone 17" would substring-match against a hypothetical "iPhone 17 Air"
-# listing otherwise.
-title_model_excludes:
-  - "iphone air"
-  - "iphoneair"
+  - "iph 14"
+  - "iph14"
+  - "iph 15"
+  - "iph15"
+  - "iph 16"
+  - "iph16"
+  - "iph 17"
+  - "iph17"
 
 # --- Primary damage keywords (auto-match if present, unless excluded below) ---
 # These represent "cheap, quick fix" damage - the profitable target range.
