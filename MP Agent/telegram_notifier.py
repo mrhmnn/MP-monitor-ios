@@ -131,6 +131,7 @@ def format_listing_message(
     posted_date: str = "",
     city: str = "",
     repair_est=None,  # repair.RepairEstimate or None
+    market_line: str = "",  # pre-formatted [MARKT] price-context line, "" = omit
 ) -> str:
     # User-written text (title, reason, price, date, city) gets escaped so it
     # can never break the HTML parse mode - see note at the top of this module.
@@ -156,6 +157,10 @@ def format_listing_message(
     repair_line = _format_repair_line(repair_est)
     if repair_line:
         lines.append(repair_line)
+    if market_line:
+        # Built entirely from our own numbers + the parsed model key, so
+        # it's safe HTML-wise, but escape anyway - defense in depth.
+        lines.append(html.escape(market_line))
     lines.append(f'<a href="{html.escape(url, quote=True)}">Open listing</a>')
 
     return "\n".join(lines)

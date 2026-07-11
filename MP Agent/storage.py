@@ -48,6 +48,51 @@ def init_db(db_path: Path = DB_PATH) -> None:
             )
             """
         )
+        # --- Market-price tracking (market.py) ---
+        # One row per tracked listing with a parseable iPhone model. Lives in
+        # the same DB file so the data-branch snapshot in scan.yml carries it
+        # without any workflow changes. Prices are cents (Marktplaats native).
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_listings (
+                listing_id TEXT PRIMARY KEY,
+                model TEXT NOT NULL,               -- "iphone 15 pro max" (repair.parse_model key)
+                storage_gb INTEGER,                -- 128/256/... NULL if unknown
+                condition TEXT,                    -- Marktplaats condition attribute
+                is_damaged INTEGER NOT NULL,       -- 1 = damaged (buy side), 0 = working (resale side)
+                price_type TEXT,                   -- FIXED / MIN_BID / FAST_BID / ...
+                title TEXT NOT NULL,
+                url TEXT NOT NULL,
+                first_seen_utc TEXT NOT NULL,
+                last_seen_utc TEXT NOT NULL,
+                last_bid_check_utc TEXT,
+                status TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'gone'
+                closed_utc TEXT,
+                final_ask_cents INTEGER,
+                final_bid_cents INTEGER,           -- highest bid ever observed
+                bid_count INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        # Append-only price observations; a row is added only when the ask
+        # or bid situation actually changed, so it stays small.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS price_obs (
+                listing_id TEXT NOT NULL,
+                ts_utc TEXT NOT NULL,
+                ask_cents INTEGER,
+                highest_bid_cents INTEGER,
+                bid_count INTEGER
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_price_obs_listing ON price_obs(listing_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_market_model ON market_listings(model, is_damaged, status)"
+        )
         conn.commit()
     logger.info("Database ready at %s", db_path)
 

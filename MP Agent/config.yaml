@@ -283,6 +283,30 @@ reject_priority_listings: true
 # 2026-07-10 (too much alert noise) - git history has it if ever needed.
 screen_repair_tier: "screen_oled"
 
+# --- Market-price tracking (market.py) ---
+# Realistic per-model pricing built from what listings ACTUALLY go for:
+# bids (scraped per listing page) and listings that disappear within days
+# with bids on them (= sale proxy; Marktplaats publishes no sold prices).
+# Resale-side sweep: broad per-generation queries whose newest-30 results
+# feed ONLY the price tracker (working phones = flip exit prices). They
+# never generate alerts. ~4 extra API calls per scan, no detail pages.
+market_queries:
+  - "iphone 14"
+  - "iphone 15"
+  - "iphone 16"
+  - "iphone 17"
+# Detail-page fetches are the expensive part, so both are capped per run
+# (runs every 30 min, so even 10-20 per run covers hundreds per day).
+market_bid_poll_per_run: 20        # bid readings for open bieden-listings
+market_closure_checks_per_run: 10  # sold/removed checks for stale listings
+# A tracked listing unseen for this many hours gets one detail-page check:
+# gone -> closed (bids + gone fast = likely sold), live -> requeued.
+market_stale_hours: 48
+# [MARKT] alert line: only shown once the damaged-segment sample size for
+# that model reaches this - keeps alerts noise-free while data accumulates.
+market_bench_min_n: 5
+market_bench_window_days: 30
+
 # --- AI classifier ---
 ai_model: "claude-haiku-4-5-20251001"
 

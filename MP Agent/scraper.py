@@ -77,6 +77,13 @@ class Listing:
     # promoted placements - private individuals dumping a broken phone
     # almost never pay to promote, repair shops constantly do.
     priority_product: str = "NONE"
+    # Structured price data (JSON strategies only). price_text above is a
+    # display string; these keep the raw numbers so market.py can build
+    # price statistics instead of throwing the value away after formatting.
+    price_cents: int = 0
+    price_type: str = ""            # FIXED / MIN_BID / FAST_BID / ...
+    condition: str = ""             # attributes[] "condition", e.g. "Zo goed als nieuw"
+    storage_text: str = ""          # attributes[] "storage", e.g. "128 GB"
 
     @property
     def combined_text(self) -> str:
@@ -134,6 +141,102 @@ def get_full_listing_text(url: str, user_agent: str) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to fetch full description for %s: %s", url, exc)
         return ""
+
+
+@dataclass
+class ListingStatus:
+    """Result of a listing detail-page check (see fetch_listing_status)."""
+    gone: bool = False
+    # Bid amounts in cents, highest first. None = page fetched but no bids
+    # array found (parse failure) - callers should treat that as "unknown",
+    # not "zero bids". [] = bids array present and empty.
+    bid_cents: Optional[list[int]] = None
+
+
+# Text markers on the "this listing no longer exists" page. Marktplaats
+# serves removed listings as a soft page rather than a clean 404 in some
+# cases, so a 200 response alone doesn't prove the listing is still live.
+_GONE_MARKERS = (
+    "niet meer beschikbaar",
+    "advertentie is verwijderd",
+    "is helaas verwijderd",
+)
+
+
+def _find_bids(node) -> Optional[list]:
+    """Recursively find the first "bids" list in the page-state JSON tree.
+    The exact path has changed between frontend deploys before, so a key
+    search is more robust than a hardcoded path."""
+    if isinstance(node, dict):
+        bids = node.get("bids")
+        if isinstance(bids, list):
+            return bids
+        for value in node.values():
+            found = _find_bids(value)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for value in node:
+            found = _find_bids(value)
+            if found is not None:
+                return found
+    return None
+
+
+# Listing detail (VIP) pages are NOT Next.js like the search page - their
+# state lives in an inline `window.__CONFIG__ = {...}` script (verified
+# live 2026-07-11). The bids sit under bidsInfo: {"bids": [{"value":
+# <cents>, ...}, ...], "currentMinimumBid": ...}.
+_VIP_CONFIG_RE = re.compile(r"window\.__CONFIG__\s*=\s*")
+
+
+def _parse_vip_config(html: str) -> Optional[dict]:
+    m = _VIP_CONFIG_RE.search(html)
+    if not m:
+        return None
+    end = html.find("</script>", m.end())
+    if end == -1:
+        return None
+    try:
+        return json.loads(html[m.end():end].strip().rstrip(";"))
+    except json.JSONDecodeError:
+        return None
+
+
+def fetch_listing_status(url: str, user_agent: str) -> ListingStatus:
+    """
+    Fetch a listing's own page and report (a) whether the listing is gone
+    (sold/removed/expired) and (b) its current bids, from the embedded
+    window.__CONFIG__ JSON (verified live 2026-07-11, e.g. m2419022529
+    showed its €150/€160 bids there).
+
+    Raises on network trouble so callers can distinguish "couldn't check"
+    from "checked and gone" - a transient fetch error must never mark a
+    listing as sold.
+    """
+    client = _get_http_client(user_agent, 15.0)
+    resp = client.get(url)
+    if resp.status_code in (404, 410):
+        return ListingStatus(gone=True)
+    resp.raise_for_status()
+
+    html = resp.text
+    lowered = html.lower()
+    if any(marker in lowered for marker in _GONE_MARKERS):
+        return ListingStatus(gone=True)
+
+    data = _parse_vip_config(html)
+    if data is None:
+        return ListingStatus(gone=False, bid_cents=None)
+
+    bids = _find_bids(data)
+    if bids is None:
+        return ListingStatus(gone=False, bid_cents=None)
+    amounts = sorted(
+        (int(b["value"]) for b in bids if isinstance(b, dict) and isinstance(b.get("value"), (int, float))),
+        reverse=True,
+    )
+    return ListingStatus(gone=False, bid_cents=amounts)
 
 
 def build_search_url(base_url_template: str, query: str) -> str:
@@ -237,6 +340,17 @@ def _listing_from_item(item: dict) -> Listing:
 
     seller = item.get("sellerInformation", {}) if isinstance(item.get("sellerInformation"), dict) else {}
 
+    # condition/storage appear in both `attributes` and `extendedAttributes`
+    # (verified live 2026-07-11); check both since either can be missing.
+    attr_map: dict[str, str] = {}
+    for attr_list in (item.get("attributes"), item.get("extendedAttributes")):
+        if isinstance(attr_list, list):
+            for attr in attr_list:
+                if isinstance(attr, dict) and attr.get("key") and attr.get("value"):
+                    attr_map.setdefault(attr["key"], attr["value"])
+
+    price_info = item.get("priceInfo") if isinstance(item.get("priceInfo"), dict) else {}
+
     return Listing(
         listing_id=str(item.get("itemId", item.get("id", ""))),
         title=item.get("title", ""),
@@ -251,6 +365,10 @@ def _listing_from_item(item: dict) -> Listing:
         seller_name=seller.get("sellerName", ""),
         seller_has_website=bool(seller.get("showWebsiteUrl", False)),
         priority_product=item.get("priorityProduct", "NONE") or "NONE",
+        price_cents=int(price_info.get("priceCents") or 0),
+        price_type=price_info.get("priceType", "") or "",
+        condition=attr_map.get("condition", ""),
+        storage_text=attr_map.get("storage", ""),
     )
 
 

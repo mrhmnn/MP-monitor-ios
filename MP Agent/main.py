@@ -24,6 +24,7 @@ import scraper
 import filters
 import ai_classifier
 import distance
+import market
 import repair
 import telegram_notifier
 
@@ -61,6 +62,10 @@ def run_scan_cycle(config: dict) -> None:
             continue
 
         total_fetched += len(listings)
+
+        # Feed everything into the market-price tracker (buy-side data:
+        # these are all damage queries). Best-effort, never raises.
+        market.ingest_listings(listings, config)
 
         for listing in listings:
             seen_record = storage.get_seen_record(listing.listing_id)
@@ -159,10 +164,18 @@ def run_scan_cycle(config: dict) -> None:
                 )
                 continue
 
+            # [MARKT] price context for the alert: what damaged phones of
+            # this model actually go for. Empty string until enough data
+            # has accumulated - the alert simply omits the line.
+            market_line = market.benchmark_line(
+                repair.parse_model(listing.title), config
+            )
+
             matches.append(
                 {
                     "listing": listing,
                     "reason": reason,
+                    "market_line": market_line,
                     "distance_km": dist_result.distance_km,
                     "duration_minutes": dist_result.duration_minutes,
                     # [FONEDAY] repair-cost estimate, shown in the alert as
@@ -176,6 +189,26 @@ def run_scan_cycle(config: dict) -> None:
             )
 
         time.sleep(config["request_delay_seconds"])
+
+    # --- Market-price tracking (resale side + bids + closures) ---
+    # Resale sweep: broad per-generation queries whose listings only feed
+    # the price tracker (working phones = what a repaired flip sells for).
+    # They deliberately do NOT go through the match/alert pipeline.
+    for query in config.get("market_queries", []):
+        try:
+            listings = scraper.fetch_listings(
+                query, config["base_search_url"], config["user_agent"]
+            )
+            market.ingest_listings(listings, config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Market query '%s' failed: %s", query, exc)
+        time.sleep(config["request_delay_seconds"])
+
+    # Bid readings for open auction listings + sold/removed detection for
+    # listings that dropped off the radar. Both capped per run and
+    # best-effort - a pricing hiccup must never break the scan.
+    market.poll_bids(config)
+    market.check_closures(config)
 
     # Sort FARTHEST-first, so they're sent first (appearing higher up in the
     # chat) and the CLOSEST listing is sent last, landing at the bottom where
@@ -198,6 +231,7 @@ def run_scan_cycle(config: dict) -> None:
             posted_date=match["listing"].posted_date,
             city=match["listing"].location_text,
             repair_est=match["repair_est"],
+            market_line=match["market_line"],
         )
         telegram_notifier.send_listing(match["listing"].image_url, message)
 
