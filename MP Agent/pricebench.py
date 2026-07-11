@@ -9,6 +9,8 @@ Usage:
     python pricebench.py --summary                # all tracked models
     python pricebench.py --summary --telegram     # + send to Telegram
     python pricebench.py --days 14                # narrower window
+    python pricebench.py --summary --markdown "path/to/(C) Market Prices.md"
+                                                  # + update Obsidian note
 
 "verkocht" = listings gone within 7 days that had at least one bid - the
 closest thing Marktplaats offers to a real sold price. "vraag" medians are
@@ -62,6 +64,93 @@ def tracked_models(window_days: int) -> list[str]:
     return [r[0] for r in rows]
 
 
+# --- Obsidian note output -----------------------------------------------
+
+_SNAPSHOT_START = "<!-- snapshot:start -->"
+_SNAPSHOT_END = "<!-- snapshot:end -->"
+
+_NOTE_TEMPLATE = """# (C) Market Prices — Marktplaats iPhones
+
+Auto-updated by `pricebench.py --markdown` (weekly review step). Do not
+edit the snapshot section by hand — it gets replaced on every run.
+
+**Hoe te lezen:** *vraag* = mediaan vraagprijs van open listings
+(optimistisch). *bod* = mediaan hoogste bod. *verkocht* = listings die
+binnen 7 dagen verdwenen MET biedingen — de beste proxy voor echte
+verkoopprijzen die Marktplaats biedt.
+
+## Laatste snapshot
+
+{start}
+{snapshot}
+{end}
+
+## Geschiedenis
+
+Eén rij per model per week — dit wordt op termijn de echte asset:
+prijstrends zien vóór je koopt.
+
+| Datum | Model | Schade vraag | Schade verkocht (n) | Werkend vraag | Werkend verkocht (n) |
+|---|---|---|---|---|---|
+"""
+
+
+def _history_rows(models: list[str], window_days: int) -> list[str]:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    rows = []
+    for model in models:
+        damaged = market.benchmark(model, damaged=True, window_days=window_days)
+        working = market.benchmark(model, damaged=False, window_days=window_days)
+        rows.append(
+            f"| {today} | {model} "
+            f"| {_fmt(damaged['ask_median'])} "
+            f"| {_fmt(damaged['sold_median'])} ({damaged['n_sold']}) "
+            f"| {_fmt(working['ask_median'])} "
+            f"| {_fmt(working['sold_median'])} ({working['n_sold']}) |"
+        )
+    return rows
+
+
+def write_markdown(path: str, report_text: str, models: list[str], window_days: int) -> None:
+    """Update the vault note: replace the snapshot section, append one
+    history row per model. Creates the note from the template if absent."""
+    from pathlib import Path
+
+    note = Path(path)
+    snapshot = f"```\n{report_text}\n```"
+    if note.exists():
+        content = note.read_text(encoding="utf-8")
+        start = content.find(_SNAPSHOT_START)
+        end = content.find(_SNAPSHOT_END)
+        if start != -1 and end != -1:
+            content = (
+                content[: start + len(_SNAPSHOT_START)]
+                + "\n" + snapshot + "\n"
+                + content[end:]
+            )
+        else:
+            content += f"\n\n## Laatste snapshot\n\n{_SNAPSHOT_START}\n{snapshot}\n{_SNAPSHOT_END}\n"
+    else:
+        note.parent.mkdir(parents=True, exist_ok=True)
+        content = _NOTE_TEMPLATE.format(
+            start=_SNAPSHOT_START, snapshot=snapshot, end=_SNAPSHOT_END
+        )
+    if not content.endswith("\n"):
+        content += "\n"
+    # Skip rows already present for today's date+model, so rerunning the
+    # weekly step doesn't duplicate history.
+    new_rows = [
+        row for row in _history_rows(models, window_days)
+        if row.split("|")[1].strip() + "|" + row.split("|")[2]
+        not in {line.split("|")[1].strip() + "|" + line.split("|")[2]
+                for line in content.splitlines() if line.startswith("| 2")}
+    ]
+    if new_rows:
+        content += "\n".join(new_rows) + "\n"
+    note.write_text(content, encoding="utf-8")
+    print(f"\nObsidian note updated: {note}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Marktplaats iPhone price benchmark")
     parser.add_argument("model", nargs="?", help='e.g. "iphone 14" or "iphone 15 pro max"')
@@ -69,6 +158,8 @@ def main() -> None:
     parser.add_argument("--days", type=int, default=30, help="lookback window (default 30)")
     parser.add_argument("--summary", action="store_true", help="report every tracked model")
     parser.add_argument("--telegram", action="store_true", help="also send the report to Telegram")
+    parser.add_argument("--markdown", metavar="PATH",
+                        help="update an Obsidian note: replace its snapshot section and append history rows")
     args = parser.parse_args()
 
     storage.init_db()
@@ -81,10 +172,14 @@ def main() -> None:
         for model in models:
             lines.extend(report_model(model, None, args.days))
     else:
-        lines.extend(report_model(args.model.lower().strip(), args.storage, args.days))
+        models = [args.model.lower().strip()]
+        lines.extend(report_model(models[0], args.storage, args.days))
 
     text = "\n".join(lines)
     print(text)
+
+    if args.markdown:
+        write_markdown(args.markdown, text, models, args.days)
 
     if args.telegram:
         import html
