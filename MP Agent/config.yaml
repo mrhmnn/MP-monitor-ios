@@ -169,7 +169,6 @@ hard_excludes:
   - "activatie slot"
   - "waterschade"
   - "gaat niet meer aan"
-  - "gaat niet aan"
   # Counterfeit/replica phones - found in production: "voor onderdelen"
   # matched a "Namaak iPhone" (fake iPhone) listing, since that keyword
   # doesn't check whether the phone is even genuine.
