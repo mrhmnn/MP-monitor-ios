@@ -55,6 +55,16 @@ search_queries:
   # stemming, so "iphone beschadigd"-style queries never match it (the
   # m2419022529 listing wrote "Achterkant is beschadigt", verified live).
   - "iphone beschadigt"
+  # Added 2026-07-12 - bare "barst"/"gebarsten" had no query: only the
+  # phrase forms ("scherm gebarsten", "achterkant gebarsten") existed, so
+  # titles like "iPhone 15 met barst" were never fetched (found manually).
+  # No stemming on Marktplaats, so both word forms need their own query.
+  - "iphone barst"
+  - "iphone gebarsten"
+  - "iphone 14 barst"
+  - "iphone 15 barst"
+  - "iphone 16 barst"
+  - "iphone 17 barst"
 
 # HTML search page - FALLBACK ONLY, used when the LRP API call fails.
 # Note: the #Sort fragment is client-side only, so this fallback returns
@@ -200,6 +210,9 @@ ambiguous_terms:
   - "beschadigt"   # common typo of "beschadigd" seen in production (m2419022529)
   - "schade"       # bare, unqualified — subsumes lichte/kleine/val-schade above;
                    # "geen schade" negation still short-circuits it for free
+  - "barst"        # bare, unqualified — substring also covers "gebarsten",
+                   # "barstje", "barsten"; phrase forms ("scherm barst") still
+                   # auto-match as primary keywords first
 
 # --- Negation phrases: if any appear, skip AI review entirely (free filter) ---
 # Prevents wasting API calls on listings where the seller is actively
@@ -218,6 +231,9 @@ negation_phrases:
   - "geen enkel probleem"
   - "zonder problemen"
   - "geen schade"
+  - "geen barst"    # substring also covers "geen barsten"/"geen barstjes"
+  - "zonder barst"
+  - "barstvrij"
 
 # --- Noise filters: business/shop listings and "wanted to buy" ads ---
 business_seller_indicators:
