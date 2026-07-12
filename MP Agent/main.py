@@ -25,7 +25,7 @@ import filters
 import ai_classifier
 import distance
 import market
-import repair
+import models
 import telegram_notifier
 
 logging.basicConfig(
@@ -168,7 +168,7 @@ def run_scan_cycle(config: dict) -> None:
             # this model actually go for. Empty string until enough data
             # has accumulated - the alert simply omits the line.
             market_line = market.benchmark_line(
-                repair.parse_model(listing.title), config
+                models.parse_model(listing.title), config
             )
 
             matches.append(
@@ -178,13 +178,6 @@ def run_scan_cycle(config: dict) -> None:
                     "market_line": market_line,
                     "distance_km": dist_result.distance_km,
                     "duration_minutes": dist_result.duration_minutes,
-                    # [FONEDAY] repair-cost estimate, shown in the alert as
-                    # bidding context - best-effort and never raises. (The
-                    # Swappie payout/profit lines were removed 2026-07-10:
-                    # too much noise per alert.)
-                    "repair_est": repair.estimate_repair(
-                        listing.title, listing.combined_text, config,
-                    ),
                 }
             )
 
@@ -230,7 +223,6 @@ def run_scan_cycle(config: dict) -> None:
             duration_minutes=match["duration_minutes"],
             posted_date=match["listing"].posted_date,
             city=match["listing"].location_text,
-            repair_est=match["repair_est"],
             market_line=match["market_line"],
         )
         telegram_notifier.send_listing(match["listing"].image_url, message)

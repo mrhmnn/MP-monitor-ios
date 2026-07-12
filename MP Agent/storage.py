@@ -56,7 +56,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
             """
             CREATE TABLE IF NOT EXISTS market_listings (
                 listing_id TEXT PRIMARY KEY,
-                model TEXT NOT NULL,               -- "iphone 15 pro max" (repair.parse_model key)
+                model TEXT NOT NULL,               -- "iphone 15 pro max" (models.parse_model key)
                 storage_gb INTEGER,                -- 128/256/... NULL if unknown
                 condition TEXT,                    -- Marktplaats condition attribute
                 is_damaged INTEGER NOT NULL,       -- 1 = damaged (buy side), 0 = working (resale side)

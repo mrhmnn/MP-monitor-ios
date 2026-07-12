@@ -36,7 +36,7 @@ from pathlib import Path
 from statistics import median, quantiles
 from typing import Optional
 
-import repair
+import models
 import scraper
 import storage
 
@@ -98,7 +98,7 @@ def _ingest(listings, config: dict, db_path: Path) -> None:
     now = _now()
     with sqlite3.connect(db_path) as conn:
         for listing in listings:
-            model = repair.parse_model(listing.title)
+            model = models.parse_model(listing.title)
             if not model or not listing.listing_id:
                 continue
             row = conn.execute(

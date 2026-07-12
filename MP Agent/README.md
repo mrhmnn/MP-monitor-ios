@@ -88,30 +88,14 @@ adjust what counts as a match, an exclusion, or noise. Edit and re-run.
   the automated flow yet.
 - **Negotiation/reply drafting**: planned for later phases once this core
   monitoring loop is proven out.
-- **Profit estimates**: removed 2026-07-10. Alerts briefly carried a full
-  Swappie-payout profit calculation (payout − asking − repair), but it
-  added 2-3 lines of noise per alert and was never filtered on. Only the
-  [FONEDAY] repair-cost line survives (see below); the Swappie system
-  lives in git history if real flip data ever justifies reviving it.
+- **Profit/repair-cost estimates**: fully removed. The Swappie-payout
+  profit calculation went 2026-07-10 (alert noise, never filtered on) and
+  the Foneday repair-cost line went 2026-07-12 (parts source replaced by
+  a different supplier with real prices). Both live in git history if
+  ever needed.
 - **Playwright/browser automation**: only add this if the plain HTTP
   fetch approach in `scraper.py` stops working reliably (e.g. Marktplaats
   adds bot detection) - it's a heavier, slower fallback, not the default.
-
-## Repair-cost estimate in alerts
-
-Each alert includes a best-effort repair-cost line as bidding context:
-
-```
-🔩 Repair est. [FONEDAY]: €29.95 (screen)
-```
-
-- **[FONEDAY] repair** (`data/parts_prices.yaml`, refresh with
-  `python refresh_prices.py`): wholesale part cost for the damage type
-  detected in the listing text. Screen repairs assume the OLED tier by
-  default (`screen_repair_tier` in config.yaml, switch to
-  `screen_incell` for budget flips).
-- Anything unparseable (unknown model, 16e/Air, missing data) just drops
-  the line from the alert - repair info never blocks a notification.
 
 ## Cost expectations
 
@@ -135,8 +119,6 @@ marktplaats_monitor/
 ├── distance.py           # Google Maps driving/transit distance
 ├── telegram_notifier.py  # sends the actual phone notifications
 ├── storage.py            # SQLite dedup tracking
-├── repair.py             # [FONEDAY] repair-cost estimate for alerts
-├── refresh_prices.py     # refreshes Foneday repair-part prices
-├── data/                 # committed price data (Foneday)
+├── models.py             # iPhone model-name parsing (shared)
 └── seen_listings.db      # created automatically on first run
 ```

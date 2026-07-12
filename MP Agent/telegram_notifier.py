@@ -130,7 +130,6 @@ def format_listing_message(
     duration_minutes: int | None,
     posted_date: str = "",
     city: str = "",
-    repair_est=None,  # repair.RepairEstimate or None
     market_line: str = "",  # pre-formatted [MARKT] price-context line, "" = omit
 ) -> str:
     # User-written text (title, reason, price, date, city) gets escaped so it
@@ -154,9 +153,6 @@ def format_listing_message(
         lines.append(f"📍 {city_prefix}distance unavailable")
 
     lines.append(f"🔧 {html.escape(match_reason)}")
-    repair_line = _format_repair_line(repair_est)
-    if repair_line:
-        lines.append(repair_line)
     if market_line:
         # Built entirely from our own numbers + the parsed model key, so
         # it's safe HTML-wise, but escape anyway - defense in depth.
@@ -164,21 +160,3 @@ def format_listing_message(
     lines.append(f'<a href="{html.escape(url, quote=True)}">Open listing</a>')
 
     return "\n".join(lines)
-
-
-def _format_repair_line(est) -> str:
-    """[FONEDAY] repair-cost line, e.g.:
-
-        🔩 Repair est. [FONEDAY]: €29.95 (screen)
-
-    Numbers come from our own committed data file (repair.py). Returns ""
-    when no estimate could be made - the alert simply omits the line.
-    (The Swappie payout/profit lines that used to follow this one were
-    removed 2026-07-10: too much noise per alert.)
-    """
-    if est is None or est.repair_cost is None:
-        return ""
-    parts_text = ", ".join(est.repair_parts)
-    if est.repair_assumed:
-        parts_text += " (aanname)"
-    return f"🔩 Repair est. [FONEDAY]: €{est.repair_cost:.2f} ({parts_text})"

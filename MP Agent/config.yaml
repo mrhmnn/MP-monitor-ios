@@ -287,17 +287,6 @@ max_distance_km: 200
 reject_seller_with_website: true
 reject_priority_listings: true
 
-# --- Repair-cost estimate (shown in alerts as bidding context) ---
-# Which Foneday screen tier the repair-cost estimate assumes when the
-# damage is a broken screen:
-#   screen_oled   - OLED panel, looks like original, safer resale (default:
-#                   conservative, keeps the estimate honest)
-#   screen_incell - cheap aftermarket in-cell, ~half the price, budget flips
-# Prices are Foneday wholesale (data/parts_prices.yaml, refresh with:
-# python refresh_prices.py). The Swappie payout/profit side was removed
-# 2026-07-10 (too much alert noise) - git history has it if ever needed.
-screen_repair_tier: "screen_oled"
-
 # --- Market-price tracking (market.py) ---
 # Realistic per-model pricing built from what listings ACTUALLY go for:
 # bids (scraped per listing page) and listings that disappear within days
