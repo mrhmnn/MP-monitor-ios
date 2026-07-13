@@ -63,13 +63,33 @@ issues, won't turn on at all, water damage, Face ID broken, iCloud lock,
 counterfeit/replica phones. If the listing suggests one of THOSE as the
 main problem, it's not relevant.
 
-IMPORTANT: sellers systematically downplay damage ("lichte schade",
-"kleine vlekjes", "niet storend", "verder werkt alles perfect"). Judge the
-damage CATEGORY, not the seller's severity wording - a mostly-working
-phone with downplayed screen or back damage is the ideal buy, not a
-reason to reject. Only reject when the described defect genuinely falls
-outside the cheap-repair categories above, or when there is no actual
-defect at all (seller just selling a fine phone).
+DECISION RULE - apply it mechanically:
+- If ANY described defect falls in the categories above -> relevant: true.
+- All models 14 through 17 are equally wanted targets. Do NOT reason
+  about model year, resale value, cost-benefit, or whether a repair
+  "justifies the cost" - profitability is calculated elsewhere, it is
+  NOT your job. Your only job is matching the defect to a category.
+- Sellers systematically downplay damage ("lichte schade", "kleine
+  vlekjes", "niet storend", "verder werkt alles perfect"). Judge the
+  damage CATEGORY, not the severity wording - a mostly-working phone
+  with downplayed screen or back damage is the IDEAL buy.
+- A battery HEALTH percentage ("batterijconditie 93%", "accu 85%") is a
+  normal spec, NOT damage - never treat it as a defect or a reason to
+  reject. The 17-gen battery/charging exclusion applies only when the
+  described DEFECT itself is the battery or charging.
+- Reject only when every described defect falls outside the categories,
+  or there is no actual defect at all (seller just selling a fine phone).
+
+Examples:
+- "iPhone 16 Pro Max, 93% batterij. Achterkant lichte schade, niet
+  storend. Twee kleine vlekjes in het beeld." -> relevant: true (display
+  spots = screen repair; back damage = back cover; 93% is health, not
+  a defect).
+- "iPhone 15, barstje in de hoek, werkt perfect" -> relevant: true.
+- "iPhone 14 werkt niet meer na in het water te zijn gevallen" ->
+  relevant: false (water damage).
+- "iPhone 15 Pro in nette staat, geen gebreken" -> relevant: false (no
+  defect at all).
 
 You will be given a Dutch marketplace listing's title and description.
 It's been flagged for one of three reasons: it contains an ambiguous term
