@@ -39,6 +39,11 @@ def init_db(db_path: Path = DB_PATH) -> None:
             conn.execute(
                 "UPDATE seen_listings SET last_seen_utc = first_seen_utc WHERE last_seen_utc IS NULL"
             )
+        # The accept/reject reason (2026-07-13). Diagnosing "why didn't I get
+        # an alert for X" used to require replaying the whole pipeline; now
+        # it's one SELECT. NULL on rows from before this column existed.
+        if "reason" not in existing_columns:
+            conn.execute("ALTER TABLE seen_listings ADD COLUMN reason TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS geocode_cache (
@@ -134,22 +139,24 @@ def mark_seen(
     title: str,
     url: str,
     matched: bool,
+    reason: str = "",
     db_path: Path = DB_PATH,
 ) -> None:
     """
     Record a listing as processed - whether it matched our filters or not.
     We record non-matches too, so we don't waste time/tokens re-evaluating
-    the same irrelevant listing every single run.
+    the same irrelevant listing every single run. `reason` is the filter/AI
+    decision text, stored so misses can be diagnosed with one query.
     """
     now = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
             INSERT OR IGNORE INTO seen_listings
-                (listing_id, title, url, matched, first_seen_utc, last_seen_utc)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (listing_id, title, url, matched, first_seen_utc, last_seen_utc, reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (listing_id, title, url, int(matched), now, now),
+            (listing_id, title, url, int(matched), now, now, reason),
         )
         conn.commit()
 

@@ -42,28 +42,48 @@ class AiVerdict:
 
 
 SYSTEM_PROMPT = """You are a filter for a secondhand phone marketplace monitor.
-The user repairs and resells iPhones. They only care about phones with a
-CHEAP, QUICK repair: a cracked/broken screen, a broken/cracked back cover,
-a charging port problem, or cracked camera lens glass. They do NOT care
-about phones with expensive, deep damage (motherboard/logic board issues,
-won't turn on at all, water damage, iCloud lock, counterfeit/replica
-phones) - those are handled by separate rules already, so if the listing
-text suggests one of THOSE instead, it's not relevant to this task either.
+The user repairs and resells iPhones (models 14-17). They care about phones
+whose damage is a CHEAP, QUICK repair. That means ANY of these categories:
+
+- SCREEN: cracks/breaks, but ALSO panel defects fixed by the exact same
+  screen swap - spots/stains in the display (vlekken/vlekjes in het beeld),
+  lines/stripes (strepen/lijnen, groene lijn), burn-in (inbranding), dead
+  pixels, touch not responding. A working phone with display blemishes is
+  a screen repair, and exactly what the user wants.
+- BACK COVER: cracked, broken, or cosmetically damaged back glass -
+  including damage the seller calls light or "niet storend". Cosmetic back
+  damage still lowers the buy price and is a cheap swap on base/Plus models.
+- CHARGING PORT problems (14-16 gen).
+- BATTERY worn/defect (14-16 gen only - for 17-gen phones, battery and
+  charging repairs are expensive, treat those as NOT relevant).
+- CAMERA LENS GLASS cracked (the glue-on outer glass, not the module).
+
+They do NOT care about expensive, deep damage: motherboard/logic board
+issues, won't turn on at all, water damage, Face ID broken, iCloud lock,
+counterfeit/replica phones. If the listing suggests one of THOSE as the
+main problem, it's not relevant.
+
+IMPORTANT: sellers systematically downplay damage ("lichte schade",
+"kleine vlekjes", "niet storend", "verder werkt alles perfect"). Judge the
+damage CATEGORY, not the seller's severity wording - a mostly-working
+phone with downplayed screen or back damage is the ideal buy, not a
+reason to reject. Only reject when the described defect genuinely falls
+outside the cheap-repair categories above, or when there is no actual
+defect at all (seller just selling a fine phone).
 
 You will be given a Dutch marketplace listing's title and description.
 It's been flagged for one of three reasons: it contains an ambiguous term
-(like "mankement" or "gebrek") that a simple keyword search couldn't
+(like "mankement" or "schade") that a simple keyword search couldn't
 confidently classify; its title tells buyers to "read the description"
 for important details that might contradict what a keyword match alone
 would suggest; or it names a target iPhone model and came from a
 damage-focused search but matched no known damage keyword - meaning the
-seller described the damage in their own words (e.g. just "kapot" or
-"glas stuk, zie fotos") and you need to judge whether that damage
-plausibly falls in the cheap-repair category.
+seller described the damage in their own words and you need to judge
+whether it plausibly falls in the cheap-repair categories.
 
 Decide: does this listing's actual described condition plausibly match a
-cheap screen/back-cover/charging-port/camera-lens repair? Reply with ONLY
-a JSON object, no other text:
+cheap screen/back-cover/charging-port/battery/camera-lens repair? Reply
+with ONLY a JSON object, no other text:
 {"relevant": true or false, "reason": "one short sentence in English"}
 """
 

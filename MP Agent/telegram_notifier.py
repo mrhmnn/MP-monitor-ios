@@ -131,6 +131,7 @@ def format_listing_message(
     posted_date: str = "",
     city: str = "",
     market_line: str = "",  # pre-formatted [MARKT] price-context line, "" = omit
+    is_reserved: bool = False,
 ) -> str:
     # User-written text (title, reason, price, date, city) gets escaped so it
     # can never break the HTML parse mode - see note at the top of this module.
@@ -151,6 +152,12 @@ def format_listing_message(
         # City matters MOST here: with no computed distance, the name is
         # the only clue whether the listing is worth a manual look.
         lines.append(f"📍 {city_prefix}distance unavailable")
+
+    if is_reserved:
+        # Seller marked it reserved for another buyer - often still worth a
+        # message (reservations fall through constantly), but manage
+        # expectations before driving anywhere.
+        lines.append("⚠️ Gereserveerd volgens verkoper")
 
     lines.append(f"🔧 {html.escape(match_reason)}")
     if market_line:

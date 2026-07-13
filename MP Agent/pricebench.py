@@ -185,8 +185,29 @@ def main() -> None:
         import html
 
         import telegram_notifier
-        sent = telegram_notifier.send_message(f"<pre>{html.escape(text)}</pre>")
-        print(f"\nTelegram: {'sent' if sent else 'FAILED'}")
+
+        # Telegram rejects messages over 4096 chars with a 400 - and a
+        # 15-model summary flirts with that limit. Split on model blocks
+        # (every model section starts with a blank line) so each chunk
+        # stays a valid, readable <pre> message on its own.
+        chunks: list[str] = []
+        current = ""
+        for block in text.split("\n\n"):
+            candidate = f"{current}\n\n{block}" if current else block
+            if len(candidate) > 3500 and current:
+                chunks.append(current)
+                current = block
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
+
+        results = [
+            telegram_notifier.send_message(f"<pre>{html.escape(chunk)}</pre>")
+            for chunk in chunks
+        ]
+        sent = all(results)
+        print(f"\nTelegram: {'sent' if sent else 'FAILED'} ({len(chunks)} message(s))")
 
 
 if __name__ == "__main__":

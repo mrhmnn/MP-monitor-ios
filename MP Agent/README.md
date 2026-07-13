@@ -1,124 +1,121 @@
 # Marktplaats iPhone Monitor
 
-Scans Marktplaats for iPhone 14/15/16 listings with cheap-to-fix damage
-(screen, back cover, charging port), filters out noise (business sellers,
-"wanted to buy" ads, iCloud-locked phones, water damage, etc.), and pings
-your phone via Telegram with the ones worth looking at - including driving
-distance/time from Veenendaal.
+Scans Marktplaats for iPhone 14–17 listings with cheap-to-fix damage
+(screen, back cover, charging port, battery, camera lens glass), filters
+out noise (business sellers, "wanted to buy" ads, iCloud-locked phones,
+water damage, etc.), and pings your phone via Telegram with the ones worth
+looking at — including driving distance/time from Veenendaal and a
+`[MARKT]` price-context line once enough market data has accumulated.
 
-## ⚠️ Before you run this - read this part
+## How it runs in production
 
-I built the scraper (`scraper.py`) defensively, but **I could not test it
-against the live Marktplaats site from my sandboxed environment**
-(marktplaats.nl isn't reachable from where this was built). It uses two
-extraction strategies:
+GitHub Actions (`.github/workflows/scan.yml`), triggered by an external
+cron-job.org dispatcher (GitHub's own scheduler proved unreliable). State
+(the SQLite seen/market database) lives on the repo's `data` branch — the
+workflow restores it before each scan and force-pushes the updated
+snapshot after. Nothing needs to run on a local machine except the
+optional `vault_sync.py` (writes market prices into the Obsidian vault).
 
-1. Looks for an embedded JSON data blob in the page (reliable, if present)
-2. Falls back to CSS-selector scraping (the selectors are my best guess
-   and may need adjusting)
+## How listings are fetched
 
-**Your first step should be:**
+`scraper.py` uses Marktplaats' internal LRP search API
+(`/lrp/api/search`) as the primary strategy — it's the only path that
+honors true date-desc sorting, so every query returns the genuinely
+newest 30 listings. HTML parsing (`__NEXT_DATA__` blob, then CSS
+selectors) exists strictly as a fallback. Listing detail pages are
+fetched only for matches/AI-review cases (`fetch_listing_details`:
+description, true posting date, reserved flag) and for market bid/closure
+polling (`fetch_listing_status`).
+
+Note (2026-07-13): Marktplaats truncates listing descriptions server-side
+at ~230 chars for anonymous requests — the full text is not available
+without a login. Filters and the AI classifier are tuned around that.
+
+## Decision pipeline (filters.py + ai_classifier.py)
+
+1. Target model (14–17) named in the title? No → reject.
+2. Business/shop signals, buyer ads, paid placements → reject.
+3. Hard excludes (iCloud lock, water damage, motherboard...) → reject.
+4. Primary damage keyword → accept (unless the title says "lees
+   beschrijving" → AI confirms first).
+5. Ambiguous damage term surviving negation-phrase stripping → Haiku
+   judges it (model: see `ai_model` in config.yaml).
+6. No keyword at all but broad damage words survive negation stripping →
+   Haiku judges it too.
+
+Every decision (accept/reject + reason) is logged at INFO and stored in
+the `reason` column of `seen_listings` — diagnosing "why didn't I get an
+alert for X" is one SQL query against the data branch snapshot:
+
 ```bash
-python scraper.py
+git fetch origin data
+git show "origin/data:MP Agent/seen_listings.db" > /tmp/seen.db
+sqlite3 /tmp/seen.db "SELECT matched, reason FROM seen_listings WHERE listing_id='m...'"
 ```
-This runs a test fetch and prints what it found. If it prints 0 listings,
-open a Marktplaats search URL in Chrome, right-click a listing title →
-"Inspect", and update the `SELECTORS` dict at the top of `scraper.py` to
-match what you see. This is the one part of this project that depends on
-Marktplaats' current page structure, which changes over time - expect to
-revisit it occasionally.
 
-## Setup
+## Setup (local run)
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. `pip install -r requirements.txt`
+2. `cp .env.example .env` and fill in `ANTHROPIC_API_KEY`,
+   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (BotFather → new bot; chat id
+   via `https://api.telegram.org/bot<TOKEN>/getUpdates`). Distance uses
+   free Nominatim + OSRM — no Maps API key needed.
+3. `python main.py` for a manual scan; `python scraper.py` to sanity-check
+   extraction alone.
 
-2. **Get your API keys / tokens:**
-   - **Anthropic API key**: console.anthropic.com → Settings → API Keys
-   - **Telegram bot**: message `@BotFather` on Telegram → `/newbot` → follow
-     prompts → copy the token
-   - **Telegram chat ID**: send any message to your new bot, then visit
-     `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` in a browser and
-     find the numeric `"chat":{"id": ...}` value
-   - **Google Maps API key**: Google Cloud Console → enable "Distance
-     Matrix API" → create an API key
+## Tests
 
-3. **Configure secrets:**
-   ```bash
-   cp .env.example .env
-   # then edit .env and fill in your real values
-   ```
+```bash
+python -m pytest tests/ -q
+```
 
-4. **Test the scraper** (see warning above):
-   ```bash
-   python scraper.py
-   ```
-
-5. **Do a manual test run:**
-   ```bash
-   python main.py
-   ```
-   Check `Settings > Usage` won't apply here since this uses the API, not
-   Claude.ai - instead watch the Anthropic Console's usage page for actual
-   spend, which should be a few cents at most for a single run.
-
-6. **Schedule it** (Linux/Mac cron example, every 3 hours):
-   ```bash
-   crontab -e
-   ```
-   Add:
-   ```
-   0 */3 * * * cd /full/path/to/marktplaats_monitor && /usr/bin/python3 main.py >> run.log 2>&1
-   ```
-   On Windows, use Task Scheduler instead, pointing at `main.py` with the
-   same interval.
+Unit tests over the filter/parsing logic (no network) — run automatically
+on push by `.github/workflows/test.yml`. Every historical missed-listing
+bug gets a regression test named after the listing that exposed it.
 
 ## Tuning the filters
 
-All the keyword lists live in `config.yaml` - no code changes needed to
-adjust what counts as a match, an exclusion, or noise. Edit and re-run.
+All keyword lists live in `config.yaml` — no code changes needed. Two
+things to remember when adding queries: Marktplaats search has **no
+stemming** (a "beschadigd" query never matches "beschadigt"), and each
+query only returns the newest 30, so high-volume damage words need their
+own per-model variants.
 
-## What's NOT built yet (by design - see project plan)
+## Market-price tracking (market.py + pricebench.py)
 
-- **Interactive "tap for OV route" button**: requires the bot to run as a
-  persistent process (webhook/long-polling), not a cron script that exits.
-  `distance.get_transit_time()` exists and works, it's just not wired into
-  the automated flow yet.
-- **Negotiation/reply drafting**: planned for later phases once this core
-  monitoring loop is proven out.
-- **Profit/repair-cost estimates**: fully removed. The Swappie-payout
-  profit calculation went 2026-07-10 (alert noise, never filtered on) and
-  the Foneday repair-cost line went 2026-07-12 (parts source replaced by
-  a different supplier with real prices). Both live in git history if
-  ever needed.
-- **Playwright/browser automation**: only add this if the plain HTTP
-  fetch approach in `scraper.py` stops working reliably (e.g. Marktplaats
-  adds bot detection) - it's a heavier, slower fallback, not the default.
+All scanned listings plus 4 broad resale-sweep queries feed
+`market_listings`/`price_obs` in the same database: asking prices, bids
+(polled from listing pages), and a sold-price proxy (listing gone within
+7 days with at least one bid). `pricebench.py --summary` reports it;
+a weekly workflow posts it to Telegram (Sat 16:00 NL) and the weekly
+review updates the vault note.
 
-## Cost expectations
+## What's NOT built yet (by design)
 
-- **Anthropic API**: only ambiguous ("mankement") listings get sent to
-  Claude Haiku for classification - most listings resolve via free keyword
-  matching. Expect roughly €3-5/month at a scan-every-2-3-hours cadence.
-- **Google Maps Distance Matrix**: free tier covers this volume easily at
-  a few scans/day.
-- **Telegram**: free.
+- **Profit/repair-cost estimates**: removed. Swappie payout line went
+  2026-07-10, Foneday repair costs went 2026-07-12 (replaced supplier,
+  not yet wired in). Both live in git history.
+- **Phase 2 profitability filter**: waiting on real flip data + the new
+  parts supplier.
+- **Playwright/browser automation**: only if plain HTTP stops working.
 
 ## Project structure
 
 ```
-marktplaats_monitor/
-├── config.yaml           # all tunable settings (keywords, models, etc)
-├── .env                  # secrets (you create this, never commit it)
-├── main.py               # orchestration - run this on a schedule
-├── scraper.py            # fetches + parses Marktplaats search pages
-├── filters.py            # keyword/exclusion/business/buyer-ad logic
-├── ai_classifier.py      # Haiku-based classification for ambiguous cases
-├── distance.py           # Google Maps driving/transit distance
-├── telegram_notifier.py  # sends the actual phone notifications
-├── storage.py            # SQLite dedup tracking
+MP Agent/
+├── config.yaml           # all tunable settings (queries, keywords, thresholds)
+├── .env                  # secrets (never committed)
+├── main.py               # orchestration - one scan cycle, run on a schedule
+├── scraper.py            # LRP API + listing-page fetching/parsing
+├── filters.py            # keyword/exclusion/business/buyer-ad decision logic
+├── ai_classifier.py      # Haiku classification for ambiguous cases
+├── damage_detect.py      # broad damage detector (recall probe, not a gate)
+├── distance.py           # Nominatim + OSRM driving distance (free, no key)
+├── telegram_notifier.py  # alert formatting + sending
+├── storage.py            # SQLite: seen-dedup, geocode cache, market tables
+├── market.py             # market-price tracking (bids, closures, benchmarks)
+├── pricebench.py         # CLI price reports (+ Telegram / Obsidian output)
 ├── models.py             # iPhone model-name parsing (shared)
-└── seen_listings.db      # created automatically on first run
+├── vault_sync.py         # local-only: data branch -> Obsidian vault note
+└── tests/                # pytest unit tests (filters, parsing, formatting)
 ```

@@ -19,6 +19,12 @@ from dataclasses import dataclass
 import re
 from typing import Optional
 
+# Only used to decide whether a negation-guarded unmatched listing still
+# deserves an AI look (its DAMAGE list answers "is damage mentioned at
+# all?"). Safe here because hard_excludes have already run by the time
+# it's consulted - see damage_detect.py's own docstring.
+import damage_detect
+
 
 @dataclass
 class FilterResult:
@@ -85,19 +91,32 @@ def has_primary_match(text: str, primary_keywords: list[str]) -> Optional[str]:
     return _contains_any(text, primary_keywords)
 
 
+def strip_negation_phrases(text: str, negation_phrases: list[str]) -> str:
+    """Remove every negation-phrase occurrence from the text, so that only
+    NON-negated damage mentions remain for the checks that follow."""
+    for phrase in negation_phrases:
+        if phrase in text:
+            text = text.replace(phrase, " ")
+    return text
+
+
 def has_unresolved_ambiguous_term(
     text: str, ambiguous_terms: list[str], negation_phrases: list[str]
 ) -> bool:
     """
-    True if an ambiguous term (e.g. "mankement") appears WITHOUT a recognized
-    negation phrase nearby. This is the cheap free pre-filter that stops us
-    from sending "geen mankementen" listings to the AI classifier.
+    True if an ambiguous term (e.g. "mankement") appears outside of any
+    negation phrase. This is the cheap free pre-filter that stops us from
+    sending "geen mankementen" listings to the AI classifier.
+
+    The negation phrases are stripped from the text FIRST, and the
+    ambiguous terms are checked against what's left. A global "any negation
+    present -> skip" check (the old behavior) rejected real damage listings:
+    sellers routinely write "achterkant schade, verder geen problemen" -
+    the "geen problemen" is about everything EXCEPT the damage they just
+    described (real production miss, 2026-07-13).
     """
-    if not _contains_any(text, ambiguous_terms):
-        return False
-    if _contains_any(text, negation_phrases):
-        return False
-    return True
+    remaining = strip_negation_phrases(text, negation_phrases)
+    return _contains_any(remaining, ambiguous_terms) is not None
 
 
 def evaluate_listing(
@@ -213,16 +232,20 @@ def evaluate_listing(
     # search query, names a target model, and survived every shop/buyer/
     # hard-exclude gate. "iPhone 14 kapot - zie fotos" describes exactly the
     # phones we want and contains zero primary keywords; silently dropping
-    # this bucket loses real deals over phrasing. Let the AI judge them
-    # (negation-guarded like the ambiguous path, so "geen schade" listings
-    # never cost a call). Config-gated in case call volume ever needs reining in.
-    if config.get("ai_review_unmatched", True) and not _contains_any(
-        combined_text, config["negation_phrases"]
-    ):
-        return FilterResult(
-            accepted=False,
-            reason="no keyword match - needs AI judgment",
-            needs_ai_review=True,
-        )
+    # this bucket loses real deals over phrasing. Let the AI judge them.
+    # Negation-guarded so "geen schade" mint listings never cost a call -
+    # but the guard only holds if NO broad damage word survives stripping
+    # the negation phrases: "kapot glas, verder geen problemen" describes
+    # real damage and must still reach the AI (same miss class as the
+    # ambiguous-term path). Config-gated in case call volume needs reining in.
+    if config.get("ai_review_unmatched", True):
+        remaining = strip_negation_phrases(combined_text, config["negation_phrases"])
+        no_negation = remaining == combined_text
+        if no_negation or _contains_any(remaining, damage_detect.DAMAGE):
+            return FilterResult(
+                accepted=False,
+                reason="no keyword match - needs AI judgment",
+                needs_ai_review=True,
+            )
 
     return FilterResult(accepted=False, reason="no relevant damage keywords found")

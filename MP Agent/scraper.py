@@ -2,18 +2,7 @@
 scraper.py
 
 Fetches Marktplaats search result pages and extracts listing data.
-
-IMPORTANT - READ THIS BEFORE RUNNING:
-I cannot verify Marktplaats' current page structure from my sandboxed
-environment (marktplaats.nl isn't in my network allowlist for direct
-testing here). This module is written defensively with TWO extraction
-strategies, but you WILL likely need to verify/adjust the CSS selectors
-in `_parse_html_fallback()` once against the live page:
-
-  1. Open a Marktplaats search URL in Chrome
-  2. Right-click a listing title -> "Inspect"
-  3. Note the actual tag/class/data-testid attributes
-  4. Update SELECTORS below to match
+Verified against the live site repeatedly (most recently 2026-07-13).
 
 Strategy used:
   A) Marktplaats' internal LRP search API (/lrp/api/search) - the same
@@ -22,16 +11,23 @@ Strategy used:
      30 listings per query (verified live 2026-07-10).
   B) If that fails: embedded __NEXT_DATA__ JSON blob from the HTML search
      page (same item shape as A, but relevance-sorted).
-  C) If that also fails: HTML/CSS selector parsing.
+  C) If that also fails: HTML/CSS selector parsing (SELECTORS below match
+     on stable CSS-module prefixes; hash suffixes change per deploy).
+
+Listing detail (VIP) pages are a separate path: fetch_listing_details()
+for description/date/reserved-flag, fetch_listing_status() for bids and
+gone-detection. Page fetches need browser-grade headers (_PAGE_HEADERS)
+or Marktplaats serves a stripped variant without the description block.
 
 Run `python scraper.py` directly (see bottom of file) to sanity-check
-extraction against a live URL before wiring it into main.py.
+extraction against a live query.
 """
 
 import json
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 from urllib.parse import quote
 
@@ -90,57 +86,77 @@ class Listing:
         return f"{self.title} {self.description_snippet}".lower()
 
 
-def get_accurate_posting_date(url: str, user_agent: str) -> str:
-    """
-    The search-results 'date' field (used in Listing.posted_date) can
-    reflect a paid bump/repost rather than the listing's true original
-    post date - confirmed by comparing real listings where the two
-    differed by over a week. The individual listing page shows a
-    trustworthy "Sinds <date>" (Since <date>) field instead.
+# Dutch month abbreviations, for formatting __CONFIG__'s ISO "since"
+# timestamp the same way Marktplaats' own "Sinds 8 jun '26" label does.
+_NL_MONTHS = ("jan", "feb", "mrt", "apr", "mei", "jun",
+              "jul", "aug", "sep", "okt", "nov", "dec")
 
-    Only call this for actual matches, not every scanned listing - it's
-    one extra page fetch per listing, which is fine for ~10-25 matches a
-    run but wasteful for the ~280 listings scanned before filtering.
+
+@dataclass
+class ListingDetails:
+    """Everything worth extracting from one listing (VIP) page fetch."""
+    description: str = ""    # description text - see fetch_listing_details docstring
+    posted_date: str = ""    # "8 jun '26" - true original post date, not bump date
+    is_reserved: bool = False
+
+
+def fetch_listing_details(url: str, user_agent: str) -> ListingDetails:
+    """
+    One page fetch per matched/AI-reviewed listing, extracting:
+
+    - description: from the server-rendered [data-collapsable='description']
+      block. HONESTY NOTE (verified live 2026-07-13): Marktplaats truncates
+      the description server-side at ~230 chars for anonymous requests -
+      the "read more" button only toggles a CSS collapse, there is no
+      endpoint with the rest. So this is slightly longer/cleaner than the
+      ~200-char search-result snippet, but NOT guaranteed complete. The
+      old get_full_listing_text() claimed to return the whole thing; it
+      never could.
+    - posted_date: from window.__CONFIG__ listing.stats.since (ISO
+      timestamp) - the true original post date, unlike the search-result
+      date which can be a paid bump. Structured data, replacing the old
+      fragile "Sinds <date>" text regex.
+    - is_reserved: __CONFIG__ listing.isReserved - seller marked it
+      reserved for another buyer; worth a warning line in the alert.
+
+    Returns a default ListingDetails on any failure - callers fall back
+    to the search-result data they already have.
     """
     try:
         html = fetch_page(url, user_agent)
-        soup = BeautifulSoup(html, "html.parser")
-        text = soup.get_text(" ", strip=True)
-        match = re.search(r"Sinds\s+(\d{1,2}\s+\w+\s*'?\d{2,4})", text)
-        if match:
-            return match.group(1)
-        return ""
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to fetch accurate posting date for %s: %s", url, exc)
-        return ""
+        logger.warning("Failed to fetch listing page %s: %s", url, exc)
+        return ListingDetails()
 
+    details = ListingDetails()
 
-def get_full_listing_text(url: str, user_agent: str) -> str:
-    """
-    Fetch a listing's FULL description from its own page. The search
-    results JSON truncates descriptions at ~200 characters (verified live
-    2026-07-07), which is exactly the text the AI classifier judges
-    ambiguous listings on - meaning "lees beschrijving" listings were
-    being classified on a snippet that may cut off before the part that
-    matters. The listing page's description block
-    ([data-collapsable='description'], verified live) has the whole thing.
-
-    Only called for the handful of AI-review cases per run, not for every
-    scanned listing. Returns "" on any failure - callers fall back to the
-    snippet they already have.
-    """
     try:
-        html = fetch_page(url, user_agent)
         soup = BeautifulSoup(html, "html.parser")
         block = soup.select_one("[data-collapsable='description']") or soup.select_one(
             "div[class*='description']"
         )
         if block:
-            return block.get_text(" ", strip=True)
-        return ""
+            details.description = block.get_text(" ", strip=True)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to fetch full description for %s: %s", url, exc)
-        return ""
+        logger.warning("Failed to parse description for %s: %s", url, exc)
+
+    config_data = _parse_vip_config(html)
+    if config_data:
+        listing = config_data.get("listing", {})
+        if isinstance(listing, dict):
+            details.is_reserved = bool(listing.get("isReserved", False))
+            since = listing.get("stats", {}).get("since", "") if isinstance(
+                listing.get("stats"), dict
+            ) else ""
+            if since:
+                try:
+                    dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                    details.posted_date = (
+                        f"{dt.day} {_NL_MONTHS[dt.month - 1]} '{dt.year % 100:02d}"
+                    )
+                except (ValueError, IndexError):
+                    pass
+    return details
 
 
 @dataclass
@@ -215,7 +231,7 @@ def fetch_listing_status(url: str, user_agent: str) -> ListingStatus:
     listing as sold.
     """
     client = _get_http_client(user_agent, 15.0)
-    resp = client.get(url)
+    resp = client.get(url, headers=_PAGE_HEADERS)
     if resp.status_code in (404, 410):
         return ListingStatus(gone=True)
     resp.raise_for_status()
@@ -264,10 +280,27 @@ def _get_http_client(user_agent: str, timeout: float) -> httpx.Client:
     return _http_client
 
 
+# Extra headers for LISTING/SEARCH PAGE fetches (not the LRP API): without
+# the Sec-Fetch-* / Accept set a real browser sends, Marktplaats serves a
+# stripped page variant that omits the server-rendered description block
+# entirely (verified live 2026-07-13 - same URL, with vs without these
+# headers). The LRP API doesn't need them; a browser sends different
+# Sec-Fetch values for XHR anyway.
+_PAGE_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+              "image/avif,image/webp,*/*;q=0.8",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
 def fetch_page(url: str, user_agent: str, timeout: float = 15.0) -> str:
     client = _get_http_client(user_agent, timeout)
     try:
-        resp = client.get(url)
+        resp = client.get(url, headers=_PAGE_HEADERS)
         resp.raise_for_status()
         return resp.text
     except (httpx.TransportError, httpx.HTTPStatusError) as exc:
@@ -278,7 +311,7 @@ def fetch_page(url: str, user_agent: str, timeout: float = 15.0) -> str:
         if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
             raise
         logger.warning("Fetch failed for %s (%s), retrying once", url, exc)
-        resp = client.get(url)
+        resp = client.get(url, headers=_PAGE_HEADERS)
         resp.raise_for_status()
         return resp.text
 

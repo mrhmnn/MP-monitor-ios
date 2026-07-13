@@ -23,6 +23,7 @@ import storage
 import scraper
 import filters
 import ai_classifier
+import damage_detect
 import distance
 import market
 import models
@@ -69,6 +70,7 @@ def run_scan_cycle(config: dict) -> None:
 
         for listing in listings:
             seen_record = storage.get_seen_record(listing.listing_id)
+            details = None  # one listing-page fetch, shared by AI review + match handling
 
             if seen_record is None:
                 total_new += 1
@@ -86,14 +88,15 @@ def run_scan_cycle(config: dict) -> None:
                 # Ambiguous case ("mankement" without clear negation) - ask the AI
                 if result.needs_ai_review:
                     # The search-results description is truncated at ~200
-                    # chars - for "lees beschrijving" cases especially, the
-                    # detail that decides relevance often sits past that
-                    # cutoff. Fetch the full description from the listing
-                    # page so the AI judges the whole story (only done for
-                    # the few AI-review cases per run, not every listing).
-                    full_text = scraper.get_full_listing_text(listing.url, config["user_agent"])
+                    # chars - the listing page's server-rendered description
+                    # is a bit longer/cleaner (though Marktplaats truncates
+                    # that too for anonymous requests, see
+                    # scraper.fetch_listing_details). Only fetched for the
+                    # few AI-review cases per run, not every listing.
+                    details = scraper.fetch_listing_details(listing.url, config["user_agent"])
                     ai_input = (
-                        f"{listing.title}\n{full_text}" if full_text else listing.combined_text
+                        f"{listing.title}\n{details.description}"
+                        if details.description else listing.combined_text
                     )
                     ai_calls += 1
                     verdict = ai_classifier.classify_ambiguous_listing(
@@ -101,8 +104,29 @@ def run_scan_cycle(config: dict) -> None:
                     )
                     accepted = verdict.relevant
                     reason = f"AI review: {verdict.reason}"
+                    logger.info(
+                        "AI verdict for '%s': %s - %s",
+                        listing.title, "RELEVANT" if accepted else "rejected", verdict.reason,
+                    )
+                elif not accepted:
+                    # Recall probe (logging only, replaces the lost
+                    # damage_filter.py work): the broad damage detector
+                    # disagreeing with a no-AI rejection is exactly the
+                    # bucket where silent misses hide. Reviewed weekly;
+                    # promotes terms into config.yaml when patterns emerge.
+                    damaged, terms = damage_detect.is_damaged(
+                        listing.title, listing.description_snippet
+                    )
+                    if damaged:
+                        logger.info(
+                            "DISAGREEMENT probe: rejected without AI (%s) but "
+                            "damage_detect sees %s in '%s' - %s",
+                            reason, terms, listing.title, listing.url,
+                        )
 
-                storage.mark_seen(listing.listing_id, listing.title, listing.url, accepted)
+                storage.mark_seen(
+                    listing.listing_id, listing.title, listing.url, accepted, reason
+                )
             else:
                 # Already processed before. Each scan only pulls the newest-30
                 # results per query, so a listing that's been off our radar
@@ -122,18 +146,22 @@ def run_scan_cycle(config: dict) -> None:
                 reason = "Reappeared after being off-market - originally matched"
 
             if not accepted:
-                logger.debug("Rejected '%s': %s", listing.title, reason)
+                # INFO, not DEBUG: these lines are the first thing to grep
+                # when a listing that should have alerted didn't. Bounded -
+                # only new listings reach this point.
+                logger.info("Rejected '%s': %s", listing.title, reason)
                 continue
 
             logger.info("MATCH: '%s' - %s", listing.title, reason)
 
-            # The search-result date can be a bump/repost date, not the
-            # true original posting date - fetch the real one from the
-            # listing page itself (cheap here, since it's only done for
-            # actual matches, not all scanned listings).
-            accurate_date = scraper.get_accurate_posting_date(listing.url, config["user_agent"])
-            if accurate_date:
-                listing.posted_date = f"Sinds {accurate_date}"
+            # The search-result date can be a bump/repost date, not the true
+            # original posting date - the listing page has the real one
+            # (plus the reserved flag). Reuse the AI-review fetch if there
+            # was one; only matches cost this extra request otherwise.
+            if details is None:
+                details = scraper.fetch_listing_details(listing.url, config["user_agent"])
+            if details.posted_date:
+                listing.posted_date = f"Sinds {details.posted_date}"
 
             if listing.latitude is not None and listing.longitude is not None:
                 dist_result = distance.get_driving_distance_from_coords(
@@ -178,6 +206,7 @@ def run_scan_cycle(config: dict) -> None:
                     "market_line": market_line,
                     "distance_km": dist_result.distance_km,
                     "duration_minutes": dist_result.duration_minutes,
+                    "is_reserved": details.is_reserved if details else False,
                 }
             )
 
@@ -213,6 +242,7 @@ def run_scan_cycle(config: dict) -> None:
         reverse=True,
     )
 
+    failed_sends = 0
     for match in matches:
         message = telegram_notifier.format_listing_message(
             title=match["listing"].title,
@@ -224,17 +254,26 @@ def run_scan_cycle(config: dict) -> None:
             posted_date=match["listing"].posted_date,
             city=match["listing"].location_text,
             market_line=match["market_line"],
+            is_reserved=match["is_reserved"],
         )
-        telegram_notifier.send_listing(match["listing"].image_url, message)
+        if not telegram_notifier.send_listing(match["listing"].image_url, message):
+            # The listing is already marked seen, so a failed send is a
+            # permanently lost alert - make it impossible to miss in the log.
+            failed_sends += 1
+            logger.error(
+                "ALERT LOST: Telegram send failed for '%s' - %s",
+                match["listing"].title, match["listing"].url,
+            )
 
     logger.info(
         "Scan complete. Fetched: %d | New: %d | Matched: %d | Too far: %d | "
-        "AI calls: %d | Total tracked: %d",
+        "AI calls: %d | Failed sends: %d | Total tracked: %d",
         total_fetched,
         total_new,
         len(matches),
         skipped_too_far,
         ai_calls,
+        failed_sends,
         storage.count_seen(),
     )
 
