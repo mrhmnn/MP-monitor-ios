@@ -59,9 +59,14 @@ whose damage is a CHEAP, QUICK repair. That means ANY of these categories:
 - CAMERA LENS GLASS cracked (the glue-on outer glass, not the module).
 
 They do NOT care about expensive, deep damage: motherboard/logic board
-issues, won't turn on at all, water damage, Face ID broken, iCloud lock,
-counterfeit/replica phones. If the listing suggests one of THOSE as the
-main problem, it's not relevant.
+issues, water damage, Face ID broken, iCloud lock, counterfeit/replica
+phones. If the listing suggests one of THOSE as the main problem, it's
+not relevant.
+
+A phone that won't turn on ("gaat niet (meer) aan", "doet het niet") IS
+relevant: that's usually a dead battery or screen, both cheap repairs -
+UNLESS the seller also mentions water damage, board damage, or a failed
+repair attempt, in which case it's not.
 
 DECISION RULE - apply it mechanically:
 - If ANY described defect falls in the categories above -> relevant: true.

@@ -65,6 +65,12 @@ search_queries:
   - "iphone 15 barst"
   - "iphone 16 barst"
   - "iphone 17 barst"
+  # Added 2026-07-14 - won't-power-on listings are in scope again (decision:
+  # often a dead battery/screen, not a board). Without a query they'd never
+  # be fetched at all - the same fetch-gap class as the "schade"/"barst"
+  # misses. One broad query: Marktplaats matches on words, so this also
+  # surfaces "gaat niet meer aan" phrasings.
+  - "iphone gaat niet aan"
 
 # HTML search page - FALLBACK ONLY, used when the LRP API call fails.
 # Note: the #Sort fragment is client-side only, so this fallback returns
@@ -168,7 +174,6 @@ hard_excludes:
   - "activatieslot"
   - "activatie slot"
   - "waterschade"
-  - "gaat niet meer aan"
   # Counterfeit/replica phones - found in production: "voor onderdelen"
   # matched a "Namaak iPhone" (fake iPhone) listing, since that keyword
   # doesn't check whether the phone is even genuine.
@@ -212,6 +217,14 @@ ambiguous_terms:
   - "barst"        # bare, unqualified — substring also covers "gebarsten",
                    # "barstje", "barsten"; phrase forms ("scherm barst") still
                    # auto-match as primary keywords first
+  # Won't-power-on un-excluded per Milad's decision 2026-07-13 ("gaat niet
+  # aan" already un-excluded 2026-07-12): often just a dead battery or
+  # screen, not a board. AI judges each case; water/board mentions still
+  # hard-exclude above.
+  - "gaat niet aan"
+  - "gaat niet meer aan"
+  - "doet het niet meer"
+  - "start niet"
 
 # --- Negation phrases: if any appear, skip AI review entirely (free filter) ---
 # Prevents wasting API calls on listings where the seller is actively
