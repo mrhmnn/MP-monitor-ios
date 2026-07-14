@@ -7,9 +7,11 @@ on:
   # with a 1-minute test cron running 15+ minutes with zero triggers, on
   # top of a full overnight run at 30-min intervals with zero triggers).
   # Actual automation now runs via an external cron-job.org job calling
-  # this workflow's dispatch endpoint every 30 minutes - this schedule
-  # trigger is left in only as a harmless backup in case GitHub's
-  # scheduler starts working on its own later.
+  # this workflow's dispatch endpoint every 8 minutes (verified live
+  # 2026-07-15 via `gh run list` - run durations average ~2.5 min, well
+  # under the gap, so no queue backup) - this schedule trigger is left in
+  # only as a harmless backup in case GitHub's scheduler starts working
+  # on its own later.
   schedule:
     - cron: "7,37 * * * *"
   workflow_dispatch:

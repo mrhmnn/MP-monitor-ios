@@ -115,3 +115,11 @@ class TestGates:
             "iPhone 15 scherm kapot", "", CONFIG, priority_product="DAGTOPPER"
         )
         assert not result.accepted
+
+    def test_i_phone_with_space_matches_target_model(self):
+        # Real production miss 2026-07-15: m2420319890, "I phone 14 pro
+        # 256 gb" - none of target_models' substrings match "I phone" with
+        # a space, so a genuinely damaged phone titled this way would be
+        # silently dropped.
+        result = evaluate("I phone 14 pro 256 gb", "scherm kapot")
+        assert result.accepted

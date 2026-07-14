@@ -108,12 +108,18 @@ def run_scan_cycle(config: dict) -> None:
                         "AI verdict for '%s': %s - %s",
                         listing.title, "RELEVANT" if accepted else "rejected", verdict.reason,
                     )
-                elif not accepted:
+                elif not accepted and not reason.startswith("not a target model"):
                     # Recall probe (logging only, replaces the lost
                     # damage_filter.py work): the broad damage detector
                     # disagreeing with a no-AI rejection is exactly the
                     # bucket where silent misses hide. Reviewed weekly;
                     # promotes terms into config.yaml when patterns emerge.
+                    # Model-mismatch rejections are excluded (2026-07-15):
+                    # damage_detect has zero model awareness, so every
+                    # off-target listing (12/13/SE/XR/...) mentioning any
+                    # damage word fired a false disagreement - live-checked
+                    # 83% of all probe firings were this, drowning the
+                    # small number of real candidate misses.
                     damaged, terms = damage_detect.is_damaged(
                         listing.title, listing.description_snippet
                     )

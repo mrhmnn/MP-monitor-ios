@@ -318,7 +318,8 @@ market_queries:
   - "iphone 16"
   - "iphone 17"
 # Detail-page fetches are the expensive part, so both are capped per run
-# (runs every 30 min, so even 10-20 per run covers hundreds per day).
+# (runs every ~8 min via the external dispatcher, so even 10-20 per run
+# covers thousands per day).
 market_bid_poll_per_run: 20        # bid readings for open bieden-listings
 market_closure_checks_per_run: 10  # sold/removed checks for stale listings
 # A tracked listing unseen for this many hours gets one detail-page check:

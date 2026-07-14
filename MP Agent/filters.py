@@ -153,6 +153,11 @@ def evaluate_listing(
     extraction path, so the keyword-based business check stays as backup.
     """
     title_lower = title.lower()
+    # Normalize "i phone" (space) to "iphone" - sellers occasionally type it
+    # as two words (real miss 2026-07-15: "I phone 14 pro 256 gb", m2420319890)
+    # which none of target_models' substrings match since they all expect
+    # "iphone" as one word.
+    title_lower = re.sub(r"\bi\s+phone\b", "iphone", title_lower)
     combined_text = f"{title} {description}".lower()
 
     if not matches_target_model(title_lower, config["target_models"]):

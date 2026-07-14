@@ -28,22 +28,26 @@ def _norm(s):
     s = re.sub(r"[^a-z0-9 ]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
-def is_damaged(title, description=""):
-    t, d = _norm(title), _norm(description)
+def _negation_aware_hits(text):
     hits = []
-
-    # TITLE: negation-aware
     for w in DAMAGE:
-        i = t.find(w)
+        i = text.find(w)
         if i == -1:
             continue
-        before = t[:i].split()[-4:]
-        after = t[i+len(w):i+len(w)+5]
+        before = text[:i].split()[-4:]
+        after = text[i+len(w):i+len(w)+5]
         if any(x in NEG for x in before) or after.startswith(("vrij","loos")):
             continue          # "geen barst", "krasvrij"
         hits.append(w)
+    return hits
 
-    # DESCRIPTION: plain match, no negation (unchanged behaviour)
-    hits += [w for w in DAMAGE if w in d]
 
+def is_damaged(title, description=""):
+    # 2026-07-15 fix: the description used to be a plain substring match
+    # with no negation-awareness at all, unlike the title above it. Real
+    # listings m2420395281 and m2420389797 ("Geen schade" in the
+    # description) fired false DISAGREEMENT probe alerts even though
+    # filters.py correctly rejected both as damage-free.
+    t, d = _norm(title), _norm(description)
+    hits = _negation_aware_hits(t) + _negation_aware_hits(d)
     return (bool(hits), sorted(set(hits)))
