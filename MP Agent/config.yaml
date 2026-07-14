@@ -75,7 +75,12 @@ search_queries:
 # HTML search page - FALLBACK ONLY, used when the LRP API call fails.
 # Note: the #Sort fragment is client-side only, so this fallback returns
 # relevance-sorted results, not newest-first. Better than nothing.
-base_search_url: "https://www.marktplaats.nl/l/telecommunicatie/mobiele-telefoons-apple-iphone/q/{query}/#Sort:SortIndex|dateDesc"
+# L1 (telecommunicatie) only, no L2 subcategory in the path - a genuine
+# iPhone listing (m2420156378) was found miscategorized under the sibling
+# "Telefoon-opladers" L2 category, so scoping this URL to
+# "mobiele-telefoons-apple-iphone" would have missed it the same way the
+# LRP API's l2CategoryId did (see scraper.py, 2026-07-14).
+base_search_url: "https://www.marktplaats.nl/l/telecommunicatie/q/{query}/#Sort:SortIndex|dateDesc"
 
 # --- Model filter (checked against TITLE only) ---
 # Substring matching against the listing title. Since "iphone 14" is a

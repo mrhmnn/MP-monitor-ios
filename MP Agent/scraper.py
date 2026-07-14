@@ -409,12 +409,19 @@ def _listing_from_item(item: dict) -> Listing:
 # you change the sort order in the browser. Unlike the HTML search page
 # (whose #Sort fragment never reaches the server, so it's always
 # relevance-sorted), this endpoint honors sortBy/sortOrder and returns true
-# newest-first results. No auth needed. Category IDs match the
-# telecommunicatie / mobiele-telefoons-apple-iphone path baked into
-# base_search_url. Verified live 2026-07-10.
+# newest-first results. No auth needed.
+#
+# L1 (telecommunicatie) only, deliberately no l2CategoryId: found in
+# production that a genuine iPhone listing ("iPhone 15 pro kapot scherm",
+# m2420156378) was miscategorized by its seller under "Telefoon-opladers"
+# (a sibling L2 category), so restricting to l2CategoryId=1953
+# (mobiele-telefoons-apple-iphone) silently excluded it before any keyword
+# matching even ran - not a filter miss, a category-scope miss (2026-07-14).
+# Safe to broaden: matches_target_model() already requires "iphone 14-17"/
+# "iph 14-17" in the title, so non-iPhone listings from the wider category
+# still get rejected downstream.
 LRP_API_URL = "https://www.marktplaats.nl/lrp/api/search"
 LRP_L1_CATEGORY_ID = 820   # telecommunicatie
-LRP_L2_CATEGORY_ID = 1953  # mobiele-telefoons-apple-iphone
 
 
 def _fetch_listings_api(query: str, user_agent: str, timeout: float = 15.0) -> list[Listing]:
@@ -422,7 +429,6 @@ def _fetch_listings_api(query: str, user_agent: str, timeout: float = 15.0) -> l
     params = {
         "query": query,
         "l1CategoryId": str(LRP_L1_CATEGORY_ID),
-        "l2CategoryId": str(LRP_L2_CATEGORY_ID),
         "sortBy": "SORT_INDEX",
         "sortOrder": "DECREASING",
         "limit": "30",
@@ -588,7 +594,7 @@ if __name__ == "__main__":
     # against a live query before wiring everything together in main.py.
     logging.basicConfig(level=logging.INFO)
     test_query = "iphone scherm kapot"
-    test_base_url = "https://www.marktplaats.nl/l/telecommunicatie/mobiele-telefoons-apple-iphone/q/{query}/#Sort:SortIndex|dateDesc"
+    test_base_url = "https://www.marktplaats.nl/l/telecommunicatie/q/{query}/#Sort:SortIndex|dateDesc"
     test_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
     results = fetch_listings(test_query, test_base_url, test_ua)
