@@ -104,6 +104,17 @@ def run_scan_cycle(config: dict) -> None:
                     )
                     accepted = verdict.relevant
                     reason = f"AI review: {verdict.reason}"
+                    if not accepted and verdict.reason.startswith("classification error"):
+                        # API failure, not a judgment (e.g. 529 overloaded).
+                        # Don't mark seen: the next run (~8 min) will retry.
+                        # Found in the 07-18 probe review: three listings were
+                        # permanently buried as rejects this way, one of them
+                        # a textbook target (cracks front + back).
+                        logger.warning(
+                            "AI call failed for '%s' - leaving unseen to retry "
+                            "next run", listing.title,
+                        )
+                        continue
                     logger.info(
                         "AI verdict for '%s': %s - %s",
                         listing.title, "RELEVANT" if accepted else "rejected", verdict.reason,
