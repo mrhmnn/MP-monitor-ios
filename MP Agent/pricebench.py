@@ -47,10 +47,12 @@ def _segment_line(label: str, stats: dict) -> str:
 
 def report_model(model: str, storage_gb, window_days: int) -> list[str]:
     lines = [f"\n{model.upper()}" + (f" {storage_gb}GB" if storage_gb else "")]
-    for label, damaged in (("schade", True), ("werkend", False)):
-        stats = market.benchmark(model, storage_gb=storage_gb, damaged=damaged,
-                                 window_days=window_days)
-        lines.append(_segment_line(label, stats))
+    # Werkend only: this report answers "what do repaired phones sell for"
+    # (Milad, 2026-07-18). The buy-side schade benchmark still lives in the
+    # per-alert [MARKT] line (market.benchmark_line).
+    stats = market.benchmark(model, storage_gb=storage_gb, damaged=False,
+                             window_days=window_days)
+    lines.append(_segment_line("werkend", stats))
     return lines
 
 
@@ -90,8 +92,8 @@ verkoopprijzen die Marktplaats biedt.
 Eén rij per model per week — dit wordt op termijn de echte asset:
 prijstrends zien vóór je koopt.
 
-| Datum | Model | Schade vraag | Schade verkocht (n) | Werkend vraag | Werkend verkocht (n) |
-|---|---|---|---|---|---|
+| Datum | Model | Werkend vraag | Werkend verkocht (n) |
+|---|---|---|---|
 """
 
 
@@ -99,12 +101,9 @@ def _history_rows(models: list[str], window_days: int) -> list[str]:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rows = []
     for model in models:
-        damaged = market.benchmark(model, damaged=True, window_days=window_days)
         working = market.benchmark(model, damaged=False, window_days=window_days)
         rows.append(
             f"| {today} | {model} "
-            f"| {_fmt(damaged['ask_median'])} "
-            f"| {_fmt(damaged['sold_median'])} ({damaged['n_sold']}) "
             f"| {_fmt(working['ask_median'])} "
             f"| {_fmt(working['sold_median'])} ({working['n_sold']}) |"
         )
