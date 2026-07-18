@@ -82,6 +82,12 @@ DECISION RULE - apply it mechanically:
   normal spec, NOT damage - never treat it as a defect or a reason to
   reject. The 17-gen battery/charging exclusion applies only when the
   described DEFECT itself is the battery or charging.
+- A damaged SCREEN PROTECTOR (screenprotector, beschermglas, privacy
+  glass) is a removable accessory, NOT screen damage. If only the
+  protector is damaged and the phone itself is fine -> not relevant.
+- Damage that was ALREADY REPAIRED ("scherm vervangen", "gerepareerd",
+  "onder garantie hersteld") is not a defect - the phone works and needs
+  no repair. Relevant only if a CURRENT, unrepaired defect remains.
 - Reject only when every described defect falls outside the categories,
   or there is no actual defect at all (seller just selling a fine phone).
 
@@ -95,6 +101,12 @@ Examples:
   relevant: false (water damage).
 - "iPhone 15 Pro in nette staat, geen gebreken" -> relevant: false (no
   defect at all).
+- "iPhone 14 Pro Max, klein barstje in de screenprotector, toestel
+  zelf zonder schade" -> relevant: false (protector is an accessory,
+  the phone's own screen is fine).
+- "iPhone 15 Pro, scherm onlangs vervangen vanwege defect, werkt nu
+  perfect" -> relevant: false (already repaired - no current defect
+  remains).
 
 You will be given a Dutch marketplace listing's title and description.
 It's been flagged for one of three reasons: it contains an ambiguous term
