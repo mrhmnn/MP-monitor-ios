@@ -9,10 +9,17 @@ Decision flow for a single listing (title + description combined as `text`):
   1. Does it mention a target model (14/15/16)? If not -> reject.
   2. Does it look like a business/shop listing, or a "wanted to buy" ad? If so -> reject.
   3. Does it contain a hard-exclude term (icloud lock, waterschade, etc)? If so -> reject.
-  4. Does it contain a primary keyword (screen/back/charging damage)? If so -> ACCEPT.
-  5. Does it contain an ambiguous term (e.g. "mankement") WITHOUT a negation nearby?
-     If so -> route to AI classifier (handled by caller, not this module).
-  6. Otherwise -> reject.
+  4. Is it a bulk lot ("N stuks")? If so -> reject.
+  5. Does it contain a primary keyword (screen/back/charging damage)? If so -> ACCEPT.
+  6. Does it contain an ambiguous term (e.g. "mankement", "voor onderdelen")
+     WITHOUT a negation nearby? If so -> route to AI classifier (handled by
+     caller, not this module).
+  7. Otherwise -> reject.
+
+Note (2026-07-22): "voor onderdelen"/"voor reparatie"/"voor iemand die
+handig is" are ambiguous terms (AI review), NOT primary keywords. A seller
+flagging a phone "for parts" acknowledges damage but not its kind - often a
+board-dead/locked/corroded brick, not a cheap screen swap.
 """
 
 from dataclasses import dataclass
@@ -73,6 +80,18 @@ def matches_target_model_fallback(title: str, description: str) -> bool:
     if not _BARE_MODEL_RE.search(title):
         return False
     return "iphone" in description.lower()
+
+
+# Bulk wholesaler lots: "21 stuks iphone 17/16 pro / 15 pro etc" auto-accepted
+# via the old "voor onderdelen" keyword (real, 2026-07-22). A private seller
+# with one broken phone never writes "10 stuks"+; two-digit "N stuks" is a
+# trader clearing inventory, not a single flip. Single-digit "2 stuks hoesjes"
+# (accessories bundled with a real phone) deliberately does NOT trip this.
+_BULK_LOT_RE = re.compile(r"\b\d{2,}\s*stuks\b", re.IGNORECASE)
+
+
+def is_bulk_lot(text: str) -> bool:
+    return _BULK_LOT_RE.search(text) is not None
 
 
 def is_business_listing(text: str, indicators: list[str], threshold: int) -> bool:
@@ -193,6 +212,12 @@ def evaluate_listing(
         return FilterResult(
             accepted=False,
             reason="title mentions LCD - target models (14-17) are OLED-only, so this is a spare part/repair listing, not a phone",
+        )
+
+    if is_bulk_lot(combined_text):
+        return FilterResult(
+            accepted=False,
+            reason="bulk lot (N stuks) - wholesaler clearing inventory, not a single flip",
         )
 
     if is_business_listing(

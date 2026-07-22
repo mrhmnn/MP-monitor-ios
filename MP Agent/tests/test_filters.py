@@ -116,6 +116,61 @@ class TestGates:
         )
         assert not result.accepted
 
+    # --- 2026-07-22 junk-alert fixes ---------------------------------------
+    # Every case below is a real listing that was auto-sent to Telegram via
+    # the old "voor onderdelen"-family primary keywords (no AI review).
+
+    def test_voor_onderdelen_routes_to_ai_not_auto_accept(self):
+        # Was auto-accepted; must now go to AI so the actual defect is judged.
+        result = evaluate("iPhone 15 voor onderdelen", "")
+        assert not result.accepted
+        assert result.needs_ai_review
+
+    def test_voor_iemand_die_handig_is_routes_to_ai(self):
+        result = evaluate("iPhone 16", "voor iemand die handig is")
+        assert not result.accepted
+        assert result.needs_ai_review
+
+    def test_icloud_locked_for_parts_rejected(self):
+        # "Iphone 17 pro met icloud" - locked, was auto-accepted via keyword.
+        result = evaluate("Iphone 17 pro met icloud", "voor onderdelen")
+        assert not result.accepted
+        assert not result.needs_ai_review
+
+    def test_icloud_vrij_still_allowed(self):
+        # "icloud vrij" (iCloud-free) must NOT be caught by the lock excludes.
+        result = evaluate("iPhone 15 voor onderdelen icloud vrij", "scherm kapot")
+        assert result.accepted
+
+    def test_corrosion_rejected(self):
+        result = evaluate("Apple iPhone 14 Pro Max - Zilver - Corrosie", "voor onderdelen")
+        assert not result.accepted
+        assert not result.needs_ai_review
+
+    def test_permanent_blocked_rejected(self):
+        result = evaluate("iPhone 15 Pro Max 256 permanent geblokkeerd", "voor onderdelen")
+        assert not result.accepted
+
+    def test_wanted_ad_without_colon_rejected(self):
+        # "Gezocht iphone 15 pro/ pro max beschadigd" - buyer, not a seller.
+        result = evaluate("Gezocht iphone 15 pro pro max beschadigd", "beschadigd scherm")
+        assert not result.accepted
+        assert not result.needs_ai_review
+
+    def test_wanted_ad_typo_rejected(self):
+        result = evaluate("Gezoht iphone 16 pro beschadigd scherm", "beschadigd scherm")
+        assert not result.accepted
+
+    def test_bulk_lot_rejected(self):
+        result = evaluate("Defecte iphones 21 stuks iphone 17 16 pro 15 pro", "voor onderdelen")
+        assert not result.accepted
+        assert not result.needs_ai_review
+
+    def test_two_stuks_accessories_not_flagged_as_bulk(self):
+        # Single-digit "2 stuks" (bundled cases) must NOT trip the bulk check.
+        result = evaluate("iPhone 15 scherm kapot", "incl. 2 stuks hoesjes")
+        assert result.accepted
+
     def test_i_phone_with_space_matches_target_model(self):
         # Real production miss 2026-07-15: m2420319890, "I phone 14 pro
         # 256 gb" - none of target_models' substrings match "I phone" with
