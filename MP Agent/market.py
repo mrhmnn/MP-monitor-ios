@@ -369,9 +369,13 @@ def benchmark(
 
 
 def benchmark_line(model: Optional[str], config: dict) -> str:
-    """One [MARKT] alert line for a damaged-listing match, e.g.:
+    """One [MARKT] alert line for a match, e.g.:
 
-        📊 [MARKT] iphone 15 schade: vraag mediaan €150 (n=12) · sold ~€135 (n=6)
+        📊 [MARKT] iphone 15 werkend: vraag mediaan €400 (n=55) · verkocht ~€375 (n=27)
+
+    Werkend (repaired-resale) numbers, not schade: what he can SELL this
+    phone for after repair is the number that decides the buy (Milad,
+    2026-07-23 - same call he made for the weekly report on 07-18).
 
     Returns "" when there's no model or not enough data yet (n below
     market_bench_min_n) - alerts stay noise-free until stats mean something.
@@ -381,7 +385,7 @@ def benchmark_line(model: Optional[str], config: dict) -> str:
             return ""
         min_n = config.get("market_bench_min_n", 5)
         stats = benchmark(
-            model, damaged=True,
+            model, damaged=False,
             window_days=config.get("market_bench_window_days", 30),
         )
         parts = []
@@ -393,7 +397,7 @@ def benchmark_line(model: Optional[str], config: dict) -> str:
             parts.append(f"verkocht ~€{stats['sold_median']:.0f} (n={stats['n_sold']})")
         if not parts:
             return ""
-        return f"📊 [MARKT] {model} schade: " + " · ".join(parts)
+        return f"📊 [MARKT] {model} werkend: " + " · ".join(parts)
     except Exception as exc:  # noqa: BLE001
         logger.error("benchmark_line failed for %s: %s", model, exc)
         return ""
