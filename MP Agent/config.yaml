@@ -161,12 +161,14 @@ primary_keywords:
   - "camera glas kapot"
   - "camera glas gebarsten"
   - "camera lens kapot"
-  # Self-flagged "for parts/repair" listings - strongest signal that the
-  # seller acknowledges damage and expects a low price
-  - "voor onderdelen"
-  - "voor reparatie"
-  - "voor iemand die handig is"
-  - "geschikt voor onderdelen"
+  # NOTE (2026-07-22): "voor onderdelen" / "voor reparatie" / "voor iemand
+  # die handig is" / "geschikt voor onderdelen" were REMOVED from here and
+  # moved to ambiguous_terms (AI review). Auto-accepting them sent a stream
+  # of junk to Telegram: iCloud/SIM-locked, corrosion (water/board), phones
+  # that crash every few minutes, and bulk wholesaler lots - all "for parts"
+  # because the seller knows the phone is beyond a cheap swap. Let Haiku
+  # judge whether the described defect is actually a cheap screen/back/port
+  # repair before alerting.
 
 # --- Hard excludes: if ANY of these appear, the listing is skipped no matter what ---
 # Deep/expensive damage or blocking issues that don't fit the profit model.
@@ -179,6 +181,20 @@ hard_excludes:
   - "activatieslot"
   - "activatie slot"
   - "waterschade"
+  # Lock / dead-phone signals (added 2026-07-22 after these auto-accepted via
+  # the old "voor onderdelen" primary keyword). "met icloud" catches locked
+  # phones still tied to an account ("icloud vrij"/"zonder icloud" are NOT
+  # matched, so genuine unlocked phones are safe). Carrier/activation locks
+  # and permanent blocks make the phone unsellable; corrosion is water/board.
+  - "met icloud"
+  - "activation lock"
+  - "niet te activeren"
+  - "permanent geblokkeerd"
+  - "definitief geblokkeerd"
+  - "sim locked"
+  - "simlocked"
+  - "sim-locked"
+  - "corrosie"
   # Counterfeit/replica phones - found in production: "voor onderdelen"
   # matched a "Namaak iPhone" (fake iPhone) listing, since that keyword
   # doesn't check whether the phone is even genuine.
@@ -230,6 +246,14 @@ ambiguous_terms:
   - "gaat niet meer aan"
   - "doet het niet meer"
   - "start niet"
+  # Moved here from primary_keywords 2026-07-22. "For parts / for repair /
+  # for someone handy" tells us the seller acknowledges damage but NOT what
+  # kind - could be a cheap screen swap or a board-dead brick. AI judges the
+  # actual defect instead of auto-alerting on the phrase.
+  - "voor onderdelen"
+  - "voor reparatie"
+  - "voor iemand die handig is"
+  - "geschikt voor onderdelen"
 
 # --- Negation phrases: if any appear, skip AI review entirely (free filter) ---
 # Prevents wasting API calls on listings where the seller is actively
@@ -268,6 +292,12 @@ buyer_ad_indicators:
   - "ik ben op zoek naar"
   - "ik zoek"
   - "gezocht:"
+  # Bare "gezocht" + common typo (2026-07-22): wanted ads titled "Gezocht
+  # iphone 15 pro beschadigd" / "Gezoht iphone 16 pro" auto-accepted via a
+  # primary keyword because the colon form never matched. Title-only check,
+  # so a seller's incidental "veel gezocht model" is a rare, low-cost miss.
+  - "gezocht "
+  - "gezoht"
   - "op zoek naar kapotte"
   - "op zoek naar defecte"
 
