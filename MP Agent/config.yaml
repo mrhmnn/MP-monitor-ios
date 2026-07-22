@@ -182,11 +182,23 @@ hard_excludes:
   - "activatie slot"
   - "waterschade"
   # Lock / dead-phone signals (added 2026-07-22 after these auto-accepted via
-  # the old "voor onderdelen" primary keyword). "met icloud" catches locked
-  # phones still tied to an account ("icloud vrij"/"zonder icloud" are NOT
-  # matched, so genuine unlocked phones are safe). Carrier/activation locks
-  # and permanent blocks make the phone unsellable; corrosion is water/board.
+  # the old "voor onderdelen" primary keyword). Carrier/activation locks and
+  # permanent blocks make the phone unsellable; corrosion is water/board.
+  #
+  # NOTE (2026-07-23): "met icloud" alone was silently killing textbook
+  # targets - "Komt met icloud verwijderd", "met iCloud account eraf" and
+  # "toestel is icloud vrij" all contain that substring while describing an
+  # explicitly UNLOCKED phone. It stays (the real listing "Iphone 17 pro met
+  # icloud" is a genuine lock), but filters.py now strips negation phrases
+  # BEFORE this gate, so the "verwijderd"/"vrij"/"eraf" forms are removed
+  # from the text first. The extra phrases below catch locks the bare term
+  # misses ("nog gekoppeld aan icloud").
   - "met icloud"
+  - "icloud gekoppeld"
+  - "gekoppeld aan icloud"
+  - "icloud staat er nog op"
+  - "icloud er nog op"
+  - "icloud slot"
   - "activation lock"
   - "niet te activeren"
   - "permanent geblokkeerd"
@@ -275,6 +287,27 @@ negation_phrases:
   - "geen barst"    # substring also covers "geen barsten"/"geen barstjes"
   - "zonder barst"
   - "barstvrij"
+  # Negations of HARD-EXCLUDE terms (2026-07-23). Since filters.py now strips
+  # negations before the hard-exclude gate, these are what stop a seller's
+  # own reassurance from rejecting their listing. Sellers of damaged phones
+  # write these constantly to pre-empt the obvious buyer question.
+  - "geen waterschade"
+  - "nooit waterschade"
+  - "zonder waterschade"
+  - "geen corrosie"
+  - "geen icloud"
+  - "zonder icloud"
+  - "icloud vrij"
+  - "icloud verwijderd"
+  - "icloud eraf"
+  - "icloud account eraf"
+  - "niet simlocked"
+  - "geen simlock"
+  - "simlockvrij"
+  - "simlock vrij"
+  - "geen moederbord"     # "geen moederbord schade" / "...problemen"
+  - "niet namaak"
+  - "geen replica"
 
 # --- Noise filters: business/shop listings and "wanted to buy" ads ---
 business_seller_indicators:

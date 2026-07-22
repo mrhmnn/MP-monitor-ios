@@ -234,7 +234,19 @@ def evaluate_listing(
     if is_buyer_ad(title_lower, config["buyer_ad_indicators"]):
         return FilterResult(accepted=False, reason="looks like a 'wanted to buy' ad, not a listing")
 
-    excluded_term = has_hard_exclude(combined_text, config["hard_excludes"])
+    # Negation-stripped FIRST (2026-07-23). Hard excludes were the last gate
+    # still doing naive substring matching, so a seller ruling a defect OUT
+    # was rejected by the very words they used to rule it out: "geen
+    # waterschade" matched 'waterschade', "icloud vrij" matched 'met icloud',
+    # "niet simlocked" matched 'simlocked'. Same negation-blindness class as
+    # the 2026-07-13 ambiguous-term miss, in the one place it was never
+    # fixed - and the 2026-07-22 lock/corrosion additions made it bite hard.
+    # A genuine exclude still fires: "geen schade aan scherm, wel
+    # waterschade" keeps 'waterschade' after the negation is stripped.
+    excluded_term = has_hard_exclude(
+        strip_negation_phrases(combined_text, config["negation_phrases"]),
+        config["hard_excludes"],
+    )
     if excluded_term:
         return FilterResult(accepted=False, reason=f"hard exclude matched: '{excluded_term}'")
 

@@ -178,3 +178,69 @@ class TestGates:
         # silently dropped.
         result = evaluate("I phone 14 pro 256 gb", "scherm kapot")
         assert result.accepted
+
+
+# --- Hard-exclude negation blindness (2026-07-23 fix) -----------------------
+
+class TestHardExcludeNegation:
+    """
+    Hard excludes were the last gate still doing naive substring matching:
+    a seller ruling a defect OUT was rejected by the very words they used to
+    rule it out. All six cases below were live-verified as rejected before
+    the fix. Same class as the 2026-07-13 ambiguous-term negation miss.
+    """
+
+    def test_geen_waterschade_is_not_a_hard_exclude(self):
+        # Must survive the hard-exclude gate. "gebarsten achterkant" isn't a
+        # primary keyword, so the correct outcome is AI review, not a
+        # silent reject on the word the seller used to rule water damage OUT.
+        result = evaluate(
+            "iPhone 16 gebarsten achterkant",
+            "Geen corrosie, geen waterschade, puur cosmetisch.",
+        )
+        assert result.accepted or result.needs_ai_review, result.reason
+
+    def test_icloud_vrij_is_not_a_lock(self):
+        result = evaluate(
+            "iPhone 15 Pro 256GB met barst in scherm",
+            "Toestel is icloud vrij en geen waterschade, alleen scherm kapot.",
+        )
+        assert result.accepted, result.reason
+
+    def test_icloud_verwijderd_is_not_a_lock(self):
+        result = evaluate(
+            "iPhone 14 Pro kapot scherm",
+            "Komt met icloud verwijderd, gewoon te gebruiken.",
+        )
+        assert result.accepted, result.reason
+
+    def test_icloud_account_eraf_is_not_a_lock(self):
+        result = evaluate(
+            "iPhone 14 Plus schade",
+            "Verkocht met iCloud account eraf, scherm gebarsten.",
+        )
+        assert result.needs_ai_review or result.accepted, result.reason
+
+    def test_niet_simlocked_is_not_a_simlock(self):
+        result = evaluate(
+            "iPhone 15 scherm kapot", "Niet simlocked, werkt met alle providers."
+        )
+        assert result.accepted, result.reason
+
+    def test_real_waterschade_still_hard_excluded(self):
+        # The fix must not blunt the gate: a genuine exclude still fires,
+        # even alongside an unrelated negation.
+        result = evaluate(
+            "iPhone 15 kapot scherm",
+            "Geen schade aan de achterkant, maar wel waterschade helaas.",
+        )
+        assert not result.accepted
+        assert "waterschade" in result.reason
+
+    def test_real_icloud_lock_still_hard_excluded(self):
+        result = evaluate(
+            "iPhone 16 Pro kapot scherm",
+            "Let op: toestel is nog gekoppeld aan icloud van vorige eigenaar.",
+        )
+        assert not result.accepted
+        assert "hard exclude" in result.reason
