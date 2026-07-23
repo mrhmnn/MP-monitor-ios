@@ -50,11 +50,11 @@ class TestNegationStripping:
     def test_unmatched_bucket_damage_word_survives_negation(self):
         # "kapot" is no primary keyword and no ambiguous term - unmatched
         # bucket. A trailing "geen problemen" must not block the AI look.
-        result = evaluate("iPhone 14", "Glas kapot aan achterzijde, verder geen problemen.")
+        result = evaluate("iPhone 15", "Glas kapot aan achterzijde, verder geen problemen.")
         assert result.needs_ai_review
 
     def test_unmatched_bucket_pure_negation_skips_ai(self):
-        result = evaluate("iPhone 14 als nieuw", "Geen problemen, altijd hoesje om gehad.")
+        result = evaluate("iPhone 15 als nieuw", "Geen problemen, altijd hoesje om gehad.")
         assert not result.needs_ai_review
 
     def test_strip_negation_phrases(self):
@@ -83,7 +83,7 @@ class TestGates:
         assert not result.accepted
 
     def test_vague_title_forces_ai_despite_keyword(self):
-        result = evaluate("iPhone 14 Pro - lees beschrijving!", "scherm kapot")
+        result = evaluate("iPhone 15 Pro - lees beschrijving!", "scherm kapot")
         assert not result.accepted
         assert result.needs_ai_review
 
@@ -96,7 +96,7 @@ class TestGates:
         assert result.accepted or result.needs_ai_review
 
     def test_lcd_title_is_spare_part_listing(self):
-        result = evaluate("iPhone 14 Pro Max scherm reparatie lcd", "voor reparatie")
+        result = evaluate("iPhone 15 Pro Max scherm reparatie lcd", "voor reparatie")
         assert not result.accepted
 
     def test_buyer_ad_rejected(self):
@@ -143,7 +143,7 @@ class TestGates:
         assert result.accepted
 
     def test_corrosion_rejected(self):
-        result = evaluate("Apple iPhone 14 Pro Max - Zilver - Corrosie", "voor onderdelen")
+        result = evaluate("Apple iPhone 15 Pro Max - Zilver - Corrosie", "voor onderdelen")
         assert not result.accepted
         assert not result.needs_ai_review
 
@@ -172,11 +172,11 @@ class TestGates:
         assert result.accepted
 
     def test_i_phone_with_space_matches_target_model(self):
-        # Real production miss 2026-07-15: m2420319890, "I phone 14 pro
+        # Real production miss 2026-07-15: m2420319890, "I phone 15 pro
         # 256 gb" - none of target_models' substrings match "I phone" with
         # a space, so a genuinely damaged phone titled this way would be
         # silently dropped.
-        result = evaluate("I phone 14 pro 256 gb", "scherm kapot")
+        result = evaluate("I phone 15 pro 256 gb", "scherm kapot")
         assert result.accepted
 
 
@@ -209,14 +209,14 @@ class TestHardExcludeNegation:
 
     def test_icloud_verwijderd_is_not_a_lock(self):
         result = evaluate(
-            "iPhone 14 Pro kapot scherm",
+            "iPhone 15 Pro kapot scherm",
             "Komt met icloud verwijderd, gewoon te gebruiken.",
         )
         assert result.accepted, result.reason
 
     def test_icloud_account_eraf_is_not_a_lock(self):
         result = evaluate(
-            "iPhone 14 Plus schade",
+            "iPhone 15 Plus schade",
             "Verkocht met iCloud account eraf, scherm gebarsten.",
         )
         assert result.needs_ai_review or result.accepted, result.reason

@@ -28,11 +28,15 @@ search_queries:
   - "iphone camera glaasje kapot"
   # Model-specific queries - one per generation to catch fresh listings
   # that broad queries might miss due to Marktplaats' relevance ranking
-  - "iphone 14 defect"
+  #
+  # TEMPORARY (2026-07-23, Milad): the iPhone 14 per-model queries are
+  # commented out along with the 14 entries in target_models below. Restore
+  # both together - see the target_models note for the full rationale.
+  # - "iphone 14 defect"
   - "iphone 15 defect"
   - "iphone 16 defect"
   - "iphone 17 defect"
-  - "iphone 14 kapot"
+  # - "iphone 14 kapot"
   - "iphone 15 kapot"
   - "iphone 16 kapot"
   - "iphone 17 kapot"
@@ -47,7 +51,7 @@ search_queries:
   # verified live that only "schade" queries surface it. Broad + per-model,
   # same pattern as kapot/defect.
   - "iphone schade"
-  - "iphone 14 schade"
+  # - "iphone 14 schade"   # temporarily off - see target_models (2026-07-23)
   - "iphone 15 schade"
   - "iphone 16 schade"
   - "iphone 17 schade"
@@ -61,7 +65,7 @@ search_queries:
   # No stemming on Marktplaats, so both word forms need their own query.
   - "iphone barst"
   - "iphone gebarsten"
-  - "iphone 14 barst"
+  # - "iphone 14 barst"    # temporarily off - see target_models (2026-07-23)
   - "iphone 15 barst"
   - "iphone 16 barst"
   - "iphone 17 barst"
@@ -91,17 +95,30 @@ base_search_url: "https://www.marktplaats.nl/l/telecommunicatie/q/{query}/#Sort:
 # "iph" entries cover the common Marktplaats abbreviation (e.g. "IPH 14
 # Pro Max scherm kapot") - sellers use this constantly and it was missing
 # entirely before, silently dropping every "iph"-titled listing.
+#
+# TEMPORARY 2026-07-23 (Milad's request): iPhone 14 is switched OFF - he
+# only wants 15-and-above in Telegram. The 14 was the single largest slice
+# of alert volume (roughly 40% of all alerts across 07-06..07-23, more than
+# 15/16/17 individually) while being the thinnest-margin generation, so it
+# was diluting attention away from the finds worth driving for.
+#
+# TO RESTORE: uncomment the four "14" entries below AND the four
+# "iphone 14 <damage>" search_queries above - both halves are needed
+# (queries fetch, target_models accepts). Nothing else references the 14.
+# Note the market_queries "iphone 14" sweep is deliberately LEFT ON: it
+# only feeds the price benchmark, never alerts, so the 14 price history
+# keeps accumulating and stays comparable when this is switched back.
 target_models:
-  - "iphone 14"
-  - "iphone14"
+  # - "iphone 14"
+  # - "iphone14"
   - "iphone 15"
   - "iphone15"
   - "iphone 16"
   - "iphone16"
   - "iphone 17"
   - "iphone17"
-  - "iph 14"
-  - "iph14"
+  # - "iph 14"
+  # - "iph14"
   - "iph 15"
   - "iph15"
   - "iph 16"
@@ -393,6 +410,25 @@ market_stale_hours: 48
 market_bench_min_n: 5
 market_bench_window_days: 30
 
+# --- Bargain sweep: working phones priced under market (2026-07-23) ---
+# The market_queries sweep above already fetches WORKING phones every run
+# for the price benchmark. A working phone well under market value is a
+# flip with no repair cost at all, so those listings now get their own
+# 🟢 [KOOPJE] alert instead of being used for statistics and discarded.
+# Costs zero extra requests - it scores listings already in memory.
+bargain_alerts_enabled: true
+# How far under the model's realistic resale price it must sit. 0.35 is
+# deliberately steep: at a gentler threshold this fires on ordinary
+# well-priced listings and becomes noise, which is the exact problem the
+# 14-series removal is meant to fix.
+bargain_min_headroom: 0.35
+# Absolute price floor - the main defence against accessory listings
+# ("hoesje voor iPhone 15", EUR 25) reading as a 94%-under-market phone.
+# A title-term veto backs it up (market._ACCESSORY_TITLE_TERMS).
+bargain_min_price_eur: 120
+# Hard cap per run. A benchmark glitch must never become a Telegram flood.
+bargain_max_alerts_per_run: 3
+
 # --- AI classifier ---
 ai_model: "claude-haiku-4-5-20251001"
 
@@ -422,4 +458,9 @@ reappear_gap_hours: 24
 # immediately instead of silently degrading matches for days, the way the
 # original scraper bug did before anyone noticed.
 alert_min_total_fetched: 30
+# Partial-breakage guard (2026-07-23). The absolute threshold above can
+# only catch total collapse: a healthy run fetches 800-1100 listings, so
+# 30 of 35 queries could break and still clear it. This fires when more
+# than this share of queries error out in one run.
+alert_max_query_failure_ratio: 0.25
 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"

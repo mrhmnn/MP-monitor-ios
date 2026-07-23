@@ -64,20 +64,47 @@ def matches_target_model(text: str, target_models: list[str]) -> bool:
 # "14"-"17" digit; the description check in matches_target_model_fallback
 # is what actually keeps this safe from false-matching unrelated listings.
 _BARE_MODEL_RE = re.compile(
-    r"\b1[4-7]\b[^\d]{0,15}?(pro\s*max|pro|plus|max|\d{2,4}\s*gb|\d{2,4}gb)",
+    r"\b(1[4-7])\b[^\d]{0,15}?(pro\s*max|pro|plus|max|\d{2,4}\s*gb|\d{2,4}gb)",
     re.IGNORECASE,
 )
 
+_GENERATION_RE = re.compile(r"\b(1[4-7])\b")
 
-def matches_target_model_fallback(title: str, description: str) -> bool:
+
+def enabled_generations(target_models: list[str]) -> set[str]:
+    """The generation numbers actually switched on in config's target_models.
+
+    Needed because target_models is the single place a generation gets
+    enabled/disabled (the iPhone 14 was switched off 2026-07-23), but the
+    bare-number fallback below matched 14-17 from a hardcoded regex range.
+    Without this, disabling "iphone 14" in config still let a title like
+    "14 Pro Max kapot scherm" through the fallback path - the config
+    switch would have been half-effective in a way that's invisible until
+    an unwanted alert shows up.
+    """
+    found = set()
+    for entry in target_models:
+        found.update(_GENERATION_RE.findall(entry.replace("iphone", " ").replace("iph", " ")))
+    return found
+
+
+def matches_target_model_fallback(
+    title: str, description: str, target_models: Optional[list[str]] = None
+) -> bool:
     """
     Fallback for bare-number titles (no "iPhone" in the title at all).
     Only trusts the bare-number regex if the description INDEPENDENTLY
     confirms "iphone" - that's what stops this from false-matching some
     unrelated "17 Pro" or "16 Plus" product that happens to share the
     category page, since the bare regex alone is deliberately loose.
+
+    `target_models` gates which generations count; omitting it keeps the
+    old "any of 14-17" behavior for callers that don't have the config.
     """
-    if not _BARE_MODEL_RE.search(title):
+    match = _BARE_MODEL_RE.search(title)
+    if not match:
+        return False
+    if target_models is not None and match.group(1) not in enabled_generations(target_models):
         return False
     return "iphone" in description.lower()
 
@@ -180,8 +207,10 @@ def evaluate_listing(
     combined_text = f"{title} {description}".lower()
 
     if not matches_target_model(title_lower, config["target_models"]):
-        if not matches_target_model_fallback(title_lower, description):
-            return FilterResult(accepted=False, reason="not a target model (14-17) in title")
+        if not matches_target_model_fallback(
+            title_lower, description, config["target_models"]
+        ):
+            return FilterResult(accepted=False, reason="not a target model in title")
 
     # Structured business-seller signals from Marktplaats' own data:
     # a seller with a linked business website is a shop by definition, and
