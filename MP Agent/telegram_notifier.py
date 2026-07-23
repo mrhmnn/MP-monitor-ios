@@ -200,9 +200,15 @@ def format_listing_message(
         lines.append("⚠️ Gereserveerd volgens verkoper")
 
     lines.append(f"🔧 {html.escape(match_reason)}")
-    if market_line:
+    if market_line and not deal_line:
         # Built entirely from our own numbers + the parsed model key, so
         # it's safe HTML-wise, but escape anyway - defense in depth.
+        #
+        # Suppressed when a 💸 deal line is present (2026-07-23): both
+        # state the same werkend reference, and three price lines on one
+        # phone-screen alert is the noise Milad asked to cut. The deal
+        # line wins because it answers the actual question - is this one
+        # worth driving for - rather than just reporting the market.
         lines.append(html.escape(market_line))
     lines.append(f'<a href="{html.escape(url, quote=True)}">Open listing</a>')
 
