@@ -209,9 +209,9 @@ def run_scan_cycle(config: dict) -> None:
                 )
                 continue
 
-            # [MARKT] price context for the alert: what damaged phones of
-            # this model actually go for. Empty string until enough data
-            # has accumulated - the alert simply omits the line.
+            # [MARKT] price context for the alert: what WERKEND phones of
+            # this model actually go for, i.e. the resale side. Empty string
+            # until enough data has accumulated - the alert omits the line.
             market_line = market.benchmark_line(
                 models.parse_model(listing.title), config
             )
