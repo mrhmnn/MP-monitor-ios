@@ -83,6 +83,13 @@ jobs:
       # we don't care about history for this file, just the current state.
       # This keeps main's history clean (only code changes appear there).
       - name: Save updated database to data branch
+        # always(): a crash in main.py used to skip this step entirely, so the
+        # run's whole seen-state was thrown away. Everything already processed
+        # got re-processed next run - re-billed AI calls, and duplicate
+        # Telegram alerts for anything that had already been sent before the
+        # crash. The DB is written incrementally as the scan goes, so saving
+        # it after a failure preserves real work rather than corrupting state.
+        if: always()
         working-directory: ${{ github.workspace }}
         run: |
           git config user.name "github-actions[bot]"

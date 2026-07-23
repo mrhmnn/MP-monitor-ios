@@ -12,6 +12,7 @@ Uses Haiku, not Sonnet: this is a cheap, high-volume classification task,
 not something that needs frontier reasoning. See project notes on cost.
 """
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -131,8 +132,14 @@ def classify_ambiguous_listing(listing_text: str, model: str) -> AiVerdict:
     Fails safe: if anything goes wrong, treat it as NOT relevant rather than
     risk spamming a notification for something we couldn't actually verify.
     """
-    client = _get_client()
     try:
+        # Inside the try on purpose: a missing ANTHROPIC_API_KEY used to raise
+        # RuntimeError out of here, and nothing in main.py catches it - the
+        # whole scan died mid-loop, silently discarding every match already
+        # collected in that run (they were marked seen, so they never alerted
+        # again either). Now it degrades to a transient error: the listing is
+        # left unseen and retried once the key works.
+        client = _get_client()
         response = client.messages.create(
             model=model,
             max_tokens=100,
@@ -143,11 +150,21 @@ def classify_ambiguous_listing(listing_text: str, model: str) -> AiVerdict:
         # Strip accidental markdown fences, just in case
         raw = raw.replace("```json", "").replace("```", "").strip()
 
-        import json
-
         parsed = json.loads(raw)
         return AiVerdict(relevant=bool(parsed["relevant"]), reason=parsed.get("reason", ""))
 
-    except Exception as exc:  # noqa: BLE001 - we want to fail safe on ANY error here
+    except (json.JSONDecodeError, KeyError, IndexError, AttributeError) as exc:
+        # PERMANENT failure: the call succeeded, the model just didn't return
+        # usable JSON for this text. Deliberately NOT reported as a
+        # "classification error" - main.py retries those forever, and a
+        # response this listing's text reliably produces would be re-fetched
+        # and re-billed every run (~180/day) while never alerting. Bury it
+        # as a normal reject instead; the reason string makes it greppable.
+        logger.warning("AI returned unparseable output, treating as reject: %s", exc)
+        return AiVerdict(relevant=False, reason=f"unparseable AI response: {exc}")
+
+    except Exception as exc:  # noqa: BLE001 - fail safe on any TRANSIENT error
+        # API/network failure (529 overloaded, timeout, connection reset).
+        # main.py leaves these unseen so the next run retries them.
         logger.warning("AI classification failed, defaulting to not-relevant: %s", exc)
         return AiVerdict(relevant=False, reason=f"classification error: {exc}")
