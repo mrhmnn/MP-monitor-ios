@@ -301,3 +301,23 @@ class TestMessageFormatting:
             posted_date="23 jul '26", posted_iso=posted,
         )
         assert "3 uur oud" in msg and "23 jul" in msg
+
+    def test_market_line_is_suppressed_when_a_deal_line_is_present(self):
+        # Both carry the same werkend reference; three price lines on one
+        # phone-screen alert is the noise the 14-removal is meant to cut.
+        msg = telegram_notifier.format_listing_message(
+            title="iPhone 15", price_text="€150", url="https://x.invalid",
+            match_reason="test", distance_km=10, duration_minutes=15,
+            market_line="📊 [MARKT] iphone 15 werkend: vraag mediaan €400",
+            deal_line="💸 🔥 TOPDEAL — vraagt €150",
+        )
+        assert "TOPDEAL" in msg and "[MARKT]" not in msg
+
+    def test_market_line_still_shows_when_there_is_no_deal_line(self):
+        # Bieden listings with no usable price still deserve the context.
+        msg = telegram_notifier.format_listing_message(
+            title="iPhone 15", price_text="Bieden", url="https://x.invalid",
+            match_reason="test", distance_km=10, duration_minutes=15,
+            market_line="📊 [MARKT] iphone 15 werkend: vraag mediaan €400",
+        )
+        assert "[MARKT]" in msg
