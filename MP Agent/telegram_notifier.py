@@ -16,6 +16,7 @@ Setup (one-time):
 import html
 import logging
 import os
+from datetime import datetime, timezone
 
 import httpx
 
@@ -121,6 +122,35 @@ def send_listing(image_url: str, caption: str) -> bool:
     return send_message(caption)
 
 
+def format_age(posted_iso: str, now: datetime | None = None) -> str:
+    """'3 min oud' / '4 uur oud' / '6 dagen oud' from an ISO timestamp.
+
+    Freshness is the most actionable field in the whole alert now that
+    damaged phones sell ~2.4x faster than they did two weeks ago
+    (measured 2026-07-23): a listing minutes old is worth messaging
+    immediately, one that has sat for days almost never is.
+    Returns "" on anything unparseable - never raises.
+    """
+    if not posted_iso:
+        return ""
+    try:
+        posted = datetime.fromisoformat(posted_iso.replace("Z", "+00:00"))
+        if posted.tzinfo is None:
+            posted = posted.replace(tzinfo=timezone.utc)
+        seconds = ((now or datetime.now(timezone.utc)) - posted).total_seconds()
+    except (ValueError, TypeError):
+        return ""
+    if seconds < 0:
+        return ""
+    minutes = int(seconds // 60)
+    if minutes < 60:
+        return f"{minutes} min oud"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours} uur oud"
+    return f"{hours // 24} dagen oud"
+
+
 def format_listing_message(
     title: str,
     price_text: str,
@@ -132,16 +162,26 @@ def format_listing_message(
     city: str = "",
     market_line: str = "",  # pre-formatted [MARKT] price-context line, "" = omit
     is_reserved: bool = False,
+    deal_line: str = "",    # pre-formatted 💸 price-verdict line, "" = omit
+    posted_iso: str = "",   # raw post timestamp, rendered as an age suffix
 ) -> str:
     # User-written text (title, reason, price, date, city) gets escaped so it
     # can never break the HTML parse mode - see note at the top of this module.
     lines = [f"<b>{html.escape(title)}</b>", f"💰 {html.escape(price_text or 'Bieden')}"]
 
+    if deal_line:
+        # Built from our own numbers, but escaped anyway - defense in depth.
+        # Placed directly under the price: it is the line that decides
+        # whether the rest of the alert is worth reading.
+        lines.append(html.escape(deal_line))
+
     if posted_date:
         # Note: Marktplaats' individual listing pages show a "Sinds <date>"
         # field (e.g. "Sinds 8 jun '26") which is the true original posting
         # date - not the bump/repost date shown in search results.
-        lines.append(f"🗓️ {html.escape(posted_date)}")
+        age = format_age(posted_iso)
+        suffix = f" · {age}" if age else ""
+        lines.append(f"🗓️ {html.escape(posted_date)}{html.escape(suffix)}")
 
     city_prefix = f"{html.escape(city)} · " if city else ""
     if distance_km is not None and duration_minutes is not None:

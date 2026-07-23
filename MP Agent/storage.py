@@ -92,6 +92,11 @@ def init_db(db_path: Path = DB_PATH) -> None:
             )
             """
         )
+        # Bargain-alert dedup (2026-07-23). Kept here rather than in
+        # seen_listings on purpose - see market.mark_bargain_alerted.
+        market_columns = {row[1] for row in conn.execute("PRAGMA table_info(market_listings)")}
+        if "bargain_alerted_utc" not in market_columns:
+            conn.execute("ALTER TABLE market_listings ADD COLUMN bargain_alerted_utc TEXT")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_price_obs_listing ON price_obs(listing_id)"
         )

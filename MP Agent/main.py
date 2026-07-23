@@ -42,6 +42,94 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
+def _send_bargains(listings, config: dict) -> int:
+    """Alert on working phones priced well under their model's market value.
+
+    A second, independent deal source alongside the damage pipeline (added
+    2026-07-23). A working iPhone 15 at EUR 250 against a EUR 405 market is
+    a better flip than most damaged ones - no parts, no wait, no risk the
+    damage turns out to be a board fault.
+
+    Reuses the resale-sweep listings already in memory, so it costs no
+    extra search requests. Only the handful that survive scoring cost a
+    detail-page fetch. Returns the number of alerts sent; never raises.
+    """
+    sent = 0
+    try:
+        candidates = market.find_bargains(listings, config)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Bargain sweep failed: %s", exc)
+        return 0
+
+    for listing, score in candidates:
+        # Reuse the normal noise gates. A bargain that's actually a shop
+        # listing, a wanted ad or a wholesale lot is still junk - and the
+        # price-anomaly angle makes those MORE likely to surface, since
+        # that's exactly the shape of a too-good-to-be-true listing.
+        verdict = filters.evaluate_listing(
+            listing.title, listing.description_snippet, config,
+            seller_has_website=listing.seller_has_website,
+            priority_product=listing.priority_product,
+        )
+        if verdict.reason.startswith((
+            "seller has a business website", "paid promoted listing",
+            "bulk lot", "looks like a business", "looks like a 'wanted",
+            "title mentions LCD",
+        )):
+            logger.info(
+                "Bargain skipped '%s': %s", listing.title, verdict.reason
+            )
+            market.mark_bargain_alerted(listing.listing_id)
+            continue
+
+        if listing.latitude is not None and listing.longitude is not None:
+            dist = distance.get_driving_distance_from_coords(
+                listing.latitude, listing.longitude,
+                config["home_lat"], config["home_lon"],
+            )
+        else:
+            dist = distance.get_driving_distance(
+                listing.location_text or "Netherlands", config["home_location"]
+            )
+        max_km = config.get("max_distance_km")
+        if max_km is not None and dist.distance_km is not None and dist.distance_km > max_km:
+            # Mark it so the same out-of-range listing isn't re-scored and
+            # re-geocoded on every one of the ~180 runs a day.
+            market.mark_bargain_alerted(listing.listing_id)
+            continue
+
+        details = scraper.fetch_listing_details(listing.url, config["user_agent"])
+        message = telegram_notifier.format_listing_message(
+            title=listing.title,
+            price_text=listing.price_text,
+            url=listing.url,
+            match_reason="Werkend toestel onder marktprijs (koopje-sweep)",
+            distance_km=dist.distance_km,
+            duration_minutes=dist.duration_minutes,
+            posted_date=details.posted_date or listing.posted_date,
+            city=listing.location_text,
+            market_line=market.bargain_line(score, listing.price_cents),
+            is_reserved=details.is_reserved,
+            posted_iso=details.posted_iso,
+        )
+        # Marked BEFORE sending: a send that fails is logged loudly below,
+        # but re-alerting the same listing every 8 minutes forever would be
+        # far worse than losing one notification.
+        market.mark_bargain_alerted(listing.listing_id)
+        if telegram_notifier.send_listing(listing.image_url, message):
+            sent += 1
+            logger.info(
+                "BARGAIN: '%s' - %.0f%% under market - %s",
+                listing.title, score["headroom_pct"] * 100, listing.url,
+            )
+        else:
+            logger.error(
+                "ALERT LOST: bargain send failed for '%s' - %s",
+                listing.title, listing.url,
+            )
+    return sent
+
+
 def run_scan_cycle(config: dict) -> None:
     storage.init_db()
 
@@ -50,7 +138,8 @@ def run_scan_cycle(config: dict) -> None:
     failed_queries = 0
     ai_calls = 0
     skipped_too_far = 0
-    matches = []  # collected here, sent (sorted by distance) at the end
+    sent_matches = 0
+    failed_sends = 0
 
     for query in config["search_queries"]:
         try:
@@ -212,20 +301,49 @@ def run_scan_cycle(config: dict) -> None:
             # [MARKT] price context for the alert: what WERKEND phones of
             # this model actually go for, i.e. the resale side. Empty string
             # until enough data has accumulated - the alert omits the line.
-            market_line = market.benchmark_line(
-                models.parse_model(listing.title), config
+            model_key = models.parse_model(listing.title)
+            market_line = market.benchmark_line(model_key, config)
+            # 💸 verdict line: this listing's asking price scored against
+            # that resale value. Turns 30 identical-looking alerts a day
+            # into a ranked list at a glance.
+            deal = market.deal_line(
+                model_key, listing.price_cents, listing.price_type, config
             )
 
-            matches.append(
-                {
-                    "listing": listing,
-                    "reason": reason,
-                    "market_line": market_line,
-                    "distance_km": dist_result.distance_km,
-                    "duration_minutes": dist_result.duration_minutes,
-                    "is_reserved": details.is_reserved if details else False,
-                }
+            message = telegram_notifier.format_listing_message(
+                title=listing.title,
+                price_text=listing.price_text,
+                url=listing.url,
+                match_reason=reason,
+                distance_km=dist_result.distance_km,
+                duration_minutes=dist_result.duration_minutes,
+                posted_date=listing.posted_date,
+                city=listing.location_text,
+                market_line=market_line,
+                is_reserved=details.is_reserved if details else False,
+                deal_line=deal,
+                posted_iso=details.posted_iso if details else "",
             )
+            # Sent IMMEDIATELY, not batched to the end of the scan
+            # (changed 2026-07-23). Alerts used to be collected across all
+            # ~35 queries and dispatched after the market bid-polling and
+            # closure-check passes, which put 3-5 minutes between finding a
+            # listing and Milad's phone buzzing - on a scan that runs every
+            # ~8 minutes, and in a market where damaged phones now sell
+            # 2.4x faster than two weeks ago. The batching existed only to
+            # sort alerts by distance, but at ~30 alerts across ~180 runs a
+            # day, over 90% of runs produce zero or one match, so the sort
+            # was almost never doing anything - it was pure latency.
+            if telegram_notifier.send_listing(listing.image_url, message):
+                sent_matches += 1
+            else:
+                # The listing is already marked seen, so a failed send is a
+                # permanently lost alert - make it impossible to miss.
+                failed_sends += 1
+                logger.error(
+                    "ALERT LOST: Telegram send failed for '%s' - %s",
+                    listing.title, listing.url,
+                )
 
         time.sleep(config["request_delay_seconds"])
 
@@ -233,12 +351,19 @@ def run_scan_cycle(config: dict) -> None:
     # Resale sweep: broad per-generation queries whose listings only feed
     # the price tracker (working phones = what a repaired flip sells for).
     # They deliberately do NOT go through the match/alert pipeline.
+    bargains_sent = 0
     for query in config.get("market_queries", []):
         try:
             listings = scraper.fetch_listings(
                 query, config["base_search_url"], config["user_agent"]
             )
             market.ingest_listings(listings, config)
+            # Bargain sweep: these are WORKING phones. Any priced well
+            # under their model's market value is a flip with no repair
+            # cost at all - previously they fed statistics and were
+            # discarded. Zero extra requests: same listings, already
+            # fetched and parsed. See market.find_bargains for the guards.
+            bargains_sent += _send_bargains(listings, config)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Market query '%s' failed: %s", query, exc)
         time.sleep(config["request_delay_seconds"])
@@ -249,45 +374,13 @@ def run_scan_cycle(config: dict) -> None:
     market.poll_bids(config)
     market.check_closures(config)
 
-    # Sort FARTHEST-first, so they're sent first (appearing higher up in the
-    # chat) and the CLOSEST listing is sent last, landing at the bottom where
-    # Telegram opens by default - no scrolling needed to see the best option.
-    # Listings with unknown distance (None) are sent first/topmost, since
-    # they're the least useful to see immediately.
-    matches.sort(
-        key=lambda m: m["distance_km"] if m["distance_km"] is not None else float("inf"),
-        reverse=True,
-    )
-
-    failed_sends = 0
-    for match in matches:
-        message = telegram_notifier.format_listing_message(
-            title=match["listing"].title,
-            price_text=match["listing"].price_text,
-            url=match["listing"].url,
-            match_reason=match["reason"],
-            distance_km=match["distance_km"],
-            duration_minutes=match["duration_minutes"],
-            posted_date=match["listing"].posted_date,
-            city=match["listing"].location_text,
-            market_line=match["market_line"],
-            is_reserved=match["is_reserved"],
-        )
-        if not telegram_notifier.send_listing(match["listing"].image_url, message):
-            # The listing is already marked seen, so a failed send is a
-            # permanently lost alert - make it impossible to miss in the log.
-            failed_sends += 1
-            logger.error(
-                "ALERT LOST: Telegram send failed for '%s' - %s",
-                match["listing"].title, match["listing"].url,
-            )
-
     logger.info(
-        "Scan complete. Fetched: %d | New: %d | Matched: %d | Too far: %d | "
-        "AI calls: %d | Failed sends: %d | Total tracked: %d",
+        "Scan complete. Fetched: %d | New: %d | Matched: %d | Bargains: %d | "
+        "Too far: %d | AI calls: %d | Failed sends: %d | Total tracked: %d",
         total_fetched,
         total_new,
-        len(matches),
+        sent_matches,
+        bargains_sent,
         skipped_too_far,
         ai_calls,
         failed_sends,
@@ -302,16 +395,29 @@ def run_scan_cycle(config: dict) -> None:
     # around, so it gets flagged loudly instead of failing silently.
     total_queries = len(config["search_queries"])
     min_expected = config.get("alert_min_total_fetched", 30)
+    # PARTIAL breakage is the realistic failure mode, and the absolute
+    # threshold above could never see it (fixed 2026-07-23). With ~35
+    # queries returning up to 30 listings each, a healthy run fetches
+    # 800-1100 - so "fewer than 30 total" only fires when essentially
+    # everything is dead. Thirty of thirty-five queries could fail and
+    # still clear it comfortably, silently gutting coverage for days.
+    # That is the exact class of silent degradation this check exists for.
+    failure_ratio = failed_queries / total_queries if total_queries else 0
+    max_failure_ratio = config.get("alert_max_query_failure_ratio", 0.25)
+    too_many_failed = failure_ratio > max_failure_ratio
     all_queries_failed = total_queries > 0 and failed_queries == total_queries
 
-    if total_fetched < min_expected or all_queries_failed:
+    if total_fetched < min_expected or all_queries_failed or too_many_failed:
         alert_lines = [
             "⚠️ <b>Scan health warning</b>",
             f"Only {total_fetched} listings fetched across {total_queries} queries "
             f"(expected at least {min_expected}).",
         ]
         if failed_queries:
-            alert_lines.append(f"{failed_queries} of {total_queries} queries raised an error.")
+            alert_lines.append(
+                f"{failed_queries} of {total_queries} queries raised an error "
+                f"({failure_ratio * 100:.0f}%)."
+            )
         alert_lines.append(
             "This usually means Marktplaats changed something or is blocking "
             "requests, not that there are genuinely fewer listings today. Worth "
@@ -319,8 +425,8 @@ def run_scan_cycle(config: dict) -> None:
         )
         alert_sent = telegram_notifier.send_message("\n".join(alert_lines))
         logger.warning(
-            "Low fetch count detected (%d < %d) - health alert %s",
-            total_fetched, min_expected,
+            "Scan health warning (fetched %d, %d/%d queries failed) - alert %s",
+            total_fetched, failed_queries, total_queries,
             "sent" if alert_sent else "FAILED TO SEND",
         )
 
