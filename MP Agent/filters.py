@@ -24,6 +24,7 @@ board-dead/locked/corroded brick, not a cheap screen swap.
 
 from dataclasses import dataclass
 import re
+import unicodedata
 from typing import Optional
 
 # Only used to decide whether a negation-guarded unmatched listing still
@@ -38,6 +39,40 @@ class FilterResult:
     accepted: bool
     reason: str
     needs_ai_review: bool = False
+
+
+# Misspellings of "iphone" observed in real production titles between
+# 2026-07-06 and 2026-07-27. Every one of these was rejected as "not a
+# target model" without ever being evaluated - including "Ihpone 17 pro
+# max" (the single highest-value model in scope) and "iphon 16 pro".
+# Typo'd titles are a genuinely valuable niche: they don't surface in other
+# buyers' searches either, so they attract less competition and sit longer.
+# The trailing (?![a-z]) stops "iphon" from rewriting a correct "iphone",
+# while still allowing digit-suffixed forms like "IPhoen13".
+_IPHONE_TYPOS_RE = re.compile(
+    r"\b(ihpone|iphon|ipone|iphoen|iphne|iphome|ipohne)(?![a-z])",
+    re.IGNORECASE,
+)
+
+
+def normalize_text(text: str) -> str:
+    """Lowercase and fold Unicode look-alikes + common misspellings of
+    "iphone" into the canonical ASCII form the matchers expect.
+
+    Unicode: the Turkish dotted capital I (U+0130) lowercases in Python to
+    "i" + COMBINING DOT ABOVE (U+0307), which never matches the plain-ASCII
+    "iphone" in target_models. Real production miss - the same seller's
+    "Iphone 15 Pro" and "Iphone 16 Pro" listings were re-seen every day from
+    2026-07-14 to 07-23 and not once evaluated, plus "Iphone 17 air"
+    (2026-07-25). NFKD + dropping combining marks folds it back to "i".
+    """
+    text = text.lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    # "i phone" (space) - real miss 2026-07-15, "I phone 14 pro 256 gb"
+    text = re.sub(r"\bi\s+phone\b", "iphone", text)
+    text = _IPHONE_TYPOS_RE.sub("iphone", text)
+    return text
 
 
 def _contains_any(text: str, phrases: list[str]) -> Optional[str]:
@@ -198,13 +233,13 @@ def evaluate_listing(
     signals than keyword heuristics, but only available via the JSON
     extraction path, so the keyword-based business check stays as backup.
     """
-    title_lower = title.lower()
-    # Normalize "i phone" (space) to "iphone" - sellers occasionally type it
-    # as two words (real miss 2026-07-15: "I phone 14 pro 256 gb", m2420319890)
-    # which none of target_models' substrings match since they all expect
-    # "iphone" as one word.
-    title_lower = re.sub(r"\bi\s+phone\b", "iphone", title_lower)
-    combined_text = f"{title} {description}".lower()
+    # normalize_text() folds case, Unicode look-alikes (Turkish dotted I) and
+    # the "i phone"/"ihpone"/"iphon" spelling variants into canonical ASCII -
+    # see its docstring for the production misses behind each rule. Applied to
+    # the combined text too so a typo in the description can't hide damage
+    # keywords from the gates below.
+    title_lower = normalize_text(title)
+    combined_text = normalize_text(f"{title} {description}")
 
     if not matches_target_model(title_lower, config["target_models"]):
         if not matches_target_model_fallback(
