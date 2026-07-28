@@ -29,8 +29,11 @@ def _is_high_value(title: str) -> bool:
 
 # --- which listings get the widened policy --------------------------------
 
-def test_the_three_zero_alert_models_are_covered(title=None):
-    assert HIGH_VALUE == {"iphone 16 pro max", "iphone 17 pro", "iphone 17 pro max"}
+def test_covered_models_are_the_pro_tier():
+    assert HIGH_VALUE == {
+        "iphone 15 pro", "iphone 16 pro", "iphone 16 pro max",
+        "iphone 17 pro", "iphone 17 pro max",
+    }
 
 
 def test_high_value_titles_are_recognised():
@@ -38,18 +41,23 @@ def test_high_value_titles_are_recognised():
         "iPhone 17 Pro Max - Defect",
         "Iphone 17 pro 256 gb",
         "iPhone 16 Pro Max 256GB Natural Titanium",
+        # Where the expensive-repair rejections actually concentrate: 24 on
+        # the 15 Pro alone, vs 3 across all three zero-alert models.
+        "iPhone 15 Pro 128GB Titanium Blauw - Oplaadpunt defect",
+        "ZGAN Apple Iphone 15 PRO - Face ID defect",
+        "iPhone 16 Pro voor onderdelen",
     ]:
         assert _is_high_value(title), title
 
 
-def test_cheaper_models_keep_the_strict_policy():
+def test_non_pro_models_keep_the_strict_policy():
     """The widened rules must not leak onto models where an expensive repair
-    really does eat the whole margin."""
+    really does eat the whole margin - base 15/16/17 resell €370-€500."""
     for title in [
-        "iPhone 15 Pro 128GB Titanium Blauw - Oplaadpunt defect",
-        "iPhone 16 Pro voor onderdelen",
         "iPhone 15 128 GB - Gebruikt met schade",
         "iPhone 17 128GB",
+        "iPhone 16 Plus 256GB",
+        "iPhone 15 Pro Max 256GB",
     ]:
         assert not _is_high_value(title), title
 
