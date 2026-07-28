@@ -9,6 +9,8 @@ when the Foneday repair-cost system was removed on 2026-07-12.
 import re
 from typing import Optional
 
+import filters
+
 # Regex for the exact model variant. Order matters: "pro max" before "pro".
 # The trailing (?![a-z0-9]) stops "iphone 16e"/"iphone 17e" from matching
 # as a base 16/17 - the e-models aren't tracked.
@@ -23,8 +25,15 @@ _MODEL_RE = re.compile(
 
 
 def parse_model(title: str) -> Optional[str]:
-    """'iPhone 15 Pro Max 256GB kapot scherm' -> 'iphone 15 pro max'."""
-    m = _MODEL_RE.search(title)
+    """'iPhone 15 Pro Max 256GB kapot scherm' -> 'iphone 15 pro max'.
+
+    Runs the title through filters.normalize_text first (2026-07-28) so the
+    Unicode and misspelling folding added for the match pipeline applies here
+    too. Without it, "Ihpone 17 pro max" cleared the filters but parsed as
+    None - costing it the [MARKT] line, the deal score, and the high-value
+    accept policy. That listing was one of the real 07-27 misses.
+    """
+    m = _MODEL_RE.search(filters.normalize_text(title))
     if not m:
         return None
     generation, variant = m.group(1), (m.group(2) or "")

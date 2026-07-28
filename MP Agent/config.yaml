@@ -463,4 +463,27 @@ alert_min_total_fetched: 30
 # 30 of 35 queries could break and still clear it. This fires when more
 # than this share of queries error out in one run.
 alert_max_query_failure_ratio: 0.25
+# How many CONSECUTIVE unhealthy runs before a Telegram warning goes out
+# (2026-07-28). Marktplaats 403s the shared GitHub Actions IP for a couple
+# of minutes at a time; at a 5-minute cadence a real outage clears this in
+# ~15 minutes, while the self-healing blips that fired two false alarms on
+# 07-28 never do. Lower it to 1 to restore the old alert-on-every-blip
+# behaviour.
+alert_health_consecutive_runs: 3
+
+# --- High-value models (2026-07-28) ---
+# On these, the AI stops rejecting defects for being expensive to repair.
+# Rationale (measured 07-27): 17 Pro, 17 Pro Max and 16 Pro Max produced
+# EXACTLY ZERO alerts for four days, against ~12 expected. Nothing broke -
+# the cheap-repair-only rule simply excludes most of what actually gets
+# listed on these models (Face ID, camera module, "voor onderdelen").
+# Milad's call: "I'd rather have 3 listings, 2 wrong 1 right, than 0."
+# The margin here is wide enough to absorb a pricier repair, and a defect
+# that scares ordinary buyers off is exactly where the discount lives - a
+# working phone with broken Face ID resells fine to a buyer who is told.
+# Hard excludes (water damage, board, iCloud lock, replica) still apply.
+high_value_models:
+  - "iphone 16 pro max"
+  - "iphone 17 pro"
+  - "iphone 17 pro max"
 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
