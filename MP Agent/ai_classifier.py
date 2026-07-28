@@ -171,7 +171,48 @@ def _parse_first_json_object(raw: str) -> dict:
     return parsed
 
 
-def classify_ambiguous_listing(listing_text: str, model: str) -> AiVerdict:
+# Appended to SYSTEM_PROMPT only for the models in config's
+# `high_value_models` (2026-07-28). Those three models alerted ZERO times in
+# four days against ~12 expected: the base prompt's cheap-repair-only rule
+# rejects nearly everything that actually gets listed on them, because the
+# defects people list a €650-1050 phone with are Face ID, camera modules and
+# bare "voor onderdelen". Milad's explicit call was to trade precision for
+# recall here - three alerts with two duds beats a silent channel - so this
+# block widens the accept categories rather than loosening severity judgment.
+# It deliberately does NOT touch the surface-scratch rule (that was his own
+# 07-24 request after near-mint 15 Pros kept alerting) and does NOT override
+# the hard excludes.
+HIGH_VALUE_SUFFIX = """
+
+OVERRIDE FOR THIS LISTING - it is one of the user's HIGHEST-VALUE models
+(iPhone 16 Pro Max / 17 Pro / 17 Pro Max, resale €650-1050). The resale
+margin here is wide enough to absorb a repair that would not be worth it on
+a cheaper phone, and the user can also simply resell the phone AS-IS with
+the defect disclosed. On this listing only:
+
+- FACE ID broken, CAMERA MODULE faults, and any similar "expensive repair"
+  defect ARE relevant. Do not reject them for being costly. A phone that is
+  otherwise fully working with one scary-sounding defect sells at a steep
+  discount precisely because most buyers avoid it - that discount is the
+  opportunity.
+- BATTERY and CHARGING PORT faults are relevant on 17-gen too (the base
+  prompt's "17-gen battery/charging is too expensive" exclusion does NOT
+  apply to these models).
+- "VOOR ONDERDELEN" / "voor reparatie" / "voor iemand die handig is" with
+  no specific defect named IS relevant. Do not infer hidden deep damage
+  from the phrase alone - if the seller named no board/water/iCloud
+  problem, treat it as an unknown-but-probably-fixable defect and accept.
+- Still reject: water damage, motherboard/logic-board failure, iCloud lock,
+  counterfeit/replica, and listings with NO defect at all. Those are real
+  write-offs, not priced-in risk.
+- The surface-scratch rule above still applies unchanged: scratches on
+  intact glass with no other defect are still not a target.
+"""
+
+
+def classify_ambiguous_listing(
+    listing_text: str, model: str, high_value: bool = False
+) -> AiVerdict:
     """
     Send one ambiguous listing to Haiku for a relevance judgment.
     Fails safe: if anything goes wrong, treat it as NOT relevant rather than
@@ -185,10 +226,11 @@ def classify_ambiguous_listing(listing_text: str, model: str) -> AiVerdict:
         # again either). Now it degrades to a transient error: the listing is
         # left unseen and retried once the key works.
         client = _get_client()
+        system = SYSTEM_PROMPT + HIGH_VALUE_SUFFIX if high_value else SYSTEM_PROMPT
         response = client.messages.create(
             model=model,
             max_tokens=100,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=[{"role": "user", "content": listing_text[:1500]}],
         )
         raw = response.content[0].text.strip()

@@ -188,8 +188,16 @@ def run_scan_cycle(config: dict) -> None:
                         if details.description else listing.combined_text
                     )
                     ai_calls += 1
+                    # High-value models get a widened accept policy: on a
+                    # €650-1050 phone an "expensive" repair is still worth
+                    # it, and the phone can be flipped as-is with the defect
+                    # disclosed. Without this, 17 Pro / 17 Pro Max / 16 Pro
+                    # Max alerted zero times in four days (2026-07-27).
+                    high_value = models.parse_model(listing.title) in set(
+                        config.get("high_value_models", [])
+                    )
                     verdict = ai_classifier.classify_ambiguous_listing(
-                        ai_input, config["ai_model"]
+                        ai_input, config["ai_model"], high_value=high_value
                     )
                     accepted = verdict.relevant
                     reason = f"AI review: {verdict.reason}"
@@ -296,6 +304,11 @@ def run_scan_cycle(config: dict) -> None:
                     "Skipping '%s' - %.0f km away (max %d km)",
                     listing.title, dist_result.distance_km, max_km,
                 )
+                storage.set_outcome(
+                    listing.listing_id,
+                    "too_far",
+                    f"too far - {dist_result.distance_km:.0f} km (max {max_km} km)",
+                )
                 continue
 
             # [MARKT] price context for the alert: what WERKEND phones of
@@ -336,6 +349,7 @@ def run_scan_cycle(config: dict) -> None:
             # was almost never doing anything - it was pure latency.
             if telegram_notifier.send_listing(listing.image_url, message):
                 sent_matches += 1
+                storage.set_outcome(listing.listing_id, "alerted")
             else:
                 # The listing is already marked seen, so a failed send is a
                 # permanently lost alert - make it impossible to miss.
@@ -343,6 +357,9 @@ def run_scan_cycle(config: dict) -> None:
                 logger.error(
                     "ALERT LOST: Telegram send failed for '%s' - %s",
                     listing.title, listing.url,
+                )
+                storage.set_outcome(
+                    listing.listing_id, "send_failed", "ALERT LOST - Telegram send failed"
                 )
 
         time.sleep(config["request_delay_seconds"])
@@ -407,7 +424,27 @@ def run_scan_cycle(config: dict) -> None:
     too_many_failed = failure_ratio > max_failure_ratio
     all_queries_failed = total_queries > 0 and failed_queries == total_queries
 
-    if total_fetched < min_expected or all_queries_failed or too_many_failed:
+    unhealthy = total_fetched < min_expected or all_queries_failed or too_many_failed
+
+    # Hysteresis (2026-07-28). Marktplaats rate-limits the shared GitHub
+    # Actions IP for a couple of minutes at a time: on 07-28 two runs fetched
+    # 0 across all 35 queries (403 on both the LRP API and the HTML fallback)
+    # while the runs immediately before and after each fetched 793. A blocked
+    # run costs nothing - dedup is keyed on listing_id, not on a time window,
+    # so anything posted during the outage is still unseen and gets picked up
+    # by the next run. Alerting on a self-healing 5-minute blip only teaches
+    # him to swipe the warning away, which is exactly how a real outage gets
+    # missed. Only sustained breakage is worth waking him for.
+    streak = storage.bump_health_counter("unhealthy_runs", unhealthy)
+    required = config.get("alert_health_consecutive_runs", 3)
+
+    if unhealthy and streak < required:
+        logger.warning(
+            "Scan unhealthy (fetched %d, %d/%d queries failed) - run %d of %d "
+            "before alerting; likely a transient block, no alert sent",
+            total_fetched, failed_queries, total_queries, streak, required,
+        )
+    elif unhealthy:
         alert_lines = [
             "⚠️ <b>Scan health warning</b>",
             f"Only {total_fetched} listings fetched across {total_queries} queries "
@@ -419,14 +456,15 @@ def run_scan_cycle(config: dict) -> None:
                 f"({failure_ratio * 100:.0f}%)."
             )
         alert_lines.append(
-            "This usually means Marktplaats changed something or is blocking "
-            "requests, not that there are genuinely fewer listings today. Worth "
-            "checking the scraper manually."
+            f"This is now {streak} consecutive failed runs, so it is not the "
+            "usual short-lived rate-limit block. Marktplaats has probably "
+            "changed something or is blocking the scraper. Worth checking "
+            "manually."
         )
         alert_sent = telegram_notifier.send_message("\n".join(alert_lines))
         logger.warning(
-            "Scan health warning (fetched %d, %d/%d queries failed) - alert %s",
-            total_fetched, failed_queries, total_queries,
+            "Scan health warning (fetched %d, %d/%d queries failed, streak %d) - alert %s",
+            total_fetched, failed_queries, total_queries, streak,
             "sent" if alert_sent else "FAILED TO SEND",
         )
 
