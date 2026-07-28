@@ -482,7 +482,19 @@ alert_health_consecutive_runs: 3
 # that scares ordinary buyers off is exactly where the discount lives - a
 # working phone with broken Face ID resells fine to a buyer who is told.
 # Hard excludes (water damage, board, iCloud lock, replica) still apply.
+# Scope widened same day after measuring the live DB (07-28). Restricting
+# this to the three zero-alert models recovered only 3 rejections in 22
+# days - because those models are the RAREST on Marktplaats (17 Pro 60,
+# 17 Pro Max 62, 16 Pro Max 72 listings, vs 249 for the 15 Pro), and most
+# of what does get listed is genuinely undamaged (sealed, like-new, screen
+# protectors). Their zero-alert streak is mostly a volume effect, not a
+# filter effect. The expensive-repair rejections are concentrated on the
+# 15 Pro (24) and 16 Pro (3) instead - both comfortably high-value
+# (verkocht €472 and €650) and both listed several times a day. Excluding
+# them would have left the policy technically live and practically inert.
 high_value_models:
+  - "iphone 15 pro"
+  - "iphone 16 pro"
   - "iphone 16 pro max"
   - "iphone 17 pro"
   - "iphone 17 pro max"
