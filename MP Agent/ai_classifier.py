@@ -146,6 +146,31 @@ with ONLY a JSON object, no other text:
 """
 
 
+def _parse_first_json_object(raw: str) -> dict:
+    """Parse the FIRST JSON object in `raw`, ignoring any prose the model
+    appended after it.
+
+    A plain json.loads() rejects the entire response when the model adds a
+    trailing sentence after valid JSON - it raises "Extra data: line N".
+    That is a recoverable formatting slip, not an unusable answer, but it
+    was being buried as a reject. Real production miss 2026-07-24: "iPhone
+    15 Pro 128GB Titanium Blauw - Oplaadpunt defect" - a charging-port
+    repair, one of the cheapest jobs there is, on a model with a EUR 472
+    verkocht median - was silently dropped this way.
+
+    raw_decode() reads one JSON value and reports how far it got, so the
+    trailing prose is simply ignored. Genuinely unparseable output still
+    raises JSONDecodeError and keeps the existing fail-closed behaviour.
+    """
+    start = raw.find("{")
+    if start == -1:
+        raise json.JSONDecodeError("no JSON object in response", raw, 0)
+    parsed, _end = json.JSONDecoder().raw_decode(raw[start:])
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("response JSON is not an object", raw, 0)
+    return parsed
+
+
 def classify_ambiguous_listing(listing_text: str, model: str) -> AiVerdict:
     """
     Send one ambiguous listing to Haiku for a relevance judgment.
@@ -170,7 +195,7 @@ def classify_ambiguous_listing(listing_text: str, model: str) -> AiVerdict:
         # Strip accidental markdown fences, just in case
         raw = raw.replace("```json", "").replace("```", "").strip()
 
-        parsed = json.loads(raw)
+        parsed = _parse_first_json_object(raw)
         return AiVerdict(relevant=bool(parsed["relevant"]), reason=parsed.get("reason", ""))
 
     except (json.JSONDecodeError, KeyError, IndexError, AttributeError) as exc:

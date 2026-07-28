@@ -244,3 +244,87 @@ class TestHardExcludeNegation:
         )
         assert not result.accepted
         assert "hard exclude" in result.reason
+
+
+# --- Title normalization: Unicode + misspellings (2026-07-27 fix) -----------
+#
+# Every case below is a real title from seen_listings.db that was rejected
+# as "not a target model" and never evaluated. Found during the 07-27 alert
+# regression analysis, which showed 17 Pro / 17 Pro Max / 16 Pro Max alerts
+# had dropped to exactly zero.
+
+class TestTitleNormalization:
+    def test_turkish_dotted_capital_i_is_folded(self):
+        # U+0130 lowercases to "i" + COMBINING DOT ABOVE, which never
+        # matched plain-ASCII "iphone". The same seller's listing was
+        # re-seen daily 2026-07-14..07-23 and never once evaluated.
+        assert "iphone" in filters.normalize_text("İPhone 15 Pro 128Gb")
+
+    def test_dotted_capital_i_listing_reaches_the_pipeline(self):
+        result = evaluate("İPhone 15 Pro 128Gb", "Scherm kapot, verder netjes.")
+        assert result.accepted, result.reason
+
+    @pytest.mark.parametrize(
+        "typo",
+        ["Ihpone", "iphon", "ipone", "iphoen", "iphne", "iphome", "ipohne"],
+    )
+    def test_common_misspellings_are_folded(self, typo):
+        assert "iphone" in filters.normalize_text(f"{typo} 17 pro max")
+
+    def test_ihpone_17_pro_max_is_a_target(self):
+        # Real title, 2026-07-27 - the highest-value model in scope,
+        # rejected outright on a transposed "h".
+        result = evaluate("Ihpone 17 pro max", "Scherm gebarsten, verder goed.")
+        assert result.accepted, result.reason
+
+    def test_correct_spelling_is_left_alone(self):
+        # The (?![a-z]) guard must stop "iphon" rewriting a valid "iphone".
+        assert filters.normalize_text("iPhone 16 Pro") == "iphone 16 pro"
+
+    def test_normalization_does_not_create_false_targets(self):
+        # Folding must not turn a non-target into a target.
+        result = evaluate("Ihpone 11 Pro", "Scherm kapot.")
+        assert not result.accepted
+        assert "not a target model" in result.reason
+
+
+# --- AI response parsing (2026-07-27 fix) -----------------------------------
+
+class TestAiResponseParsing:
+    """The model occasionally appends prose after valid JSON. That raised
+    "Extra data" and buried the listing as a reject. Real production miss
+    2026-07-24: "iPhone 15 Pro 128GB Titanium Blauw - Oplaadpunt defect"."""
+
+    def test_trailing_prose_after_json_still_parses(self):
+        import ai_classifier
+        raw = '{"relevant": true, "reason": "Cracked screen"}\n\nHope that helps!'
+        parsed = ai_classifier._parse_first_json_object(raw)
+        assert parsed["relevant"] is True
+        assert parsed["reason"] == "Cracked screen"
+
+    def test_leading_prose_before_json_still_parses(self):
+        import ai_classifier
+        raw = 'Here is my answer:\n{"relevant": false, "reason": "Accessory"}'
+        parsed = ai_classifier._parse_first_json_object(raw)
+        assert parsed["relevant"] is False
+
+    def test_plain_json_is_unaffected(self):
+        import ai_classifier
+        parsed = ai_classifier._parse_first_json_object('{"relevant": true, "reason": "x"}')
+        assert parsed["relevant"] is True
+
+    def test_genuinely_unparseable_still_raises(self):
+        import ai_classifier, json as _json
+        with pytest.raises(_json.JSONDecodeError):
+            ai_classifier._parse_first_json_object("I could not determine this.")
+
+    def test_json_array_wrapper_yields_its_first_object(self):
+        # Deliberately lenient: an array-wrapped verdict still contains a
+        # usable answer, so we take the first object rather than throwing
+        # the listing away. Fail-closed is reserved for output with no
+        # parseable object at all (see the test above).
+        import ai_classifier
+        parsed = ai_classifier._parse_first_json_object(
+            '[{"relevant": true, "reason": "Cracked back"}]'
+        )
+        assert parsed["relevant"] is True
