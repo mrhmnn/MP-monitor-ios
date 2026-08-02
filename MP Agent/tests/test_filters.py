@@ -227,6 +227,28 @@ class TestHardExcludeNegation:
         )
         assert result.accepted, result.reason
 
+    def test_bare_simlock_noun_is_hard_excluded(self):
+        # m2424178572 (2026-08-02 probe review): the Dutch noun "Simlock"
+        # matched none of the English/participle spellings, so a carrier-
+        # locked phone auto-accepted on its primary keyword with no AI
+        # review and reached Telegram.
+        result = evaluate(
+            "iPhone 15 Pro (onderdelen) - Simlock, kapot scherm",
+            "Toestel heeft simlock, scherm is kapot.",
+        )
+        assert not result.accepted
+        assert "simlock" in result.reason
+
+    def test_simlockvrij_is_not_a_simlock(self):
+        # The negation forms must still survive the newly-bare substring.
+        for description in (
+            "Simlockvrij, alleen het scherm is kapot.",
+            "Zonder simlock, werkt met alle providers.",
+            "Toestel is simlock vrij, scherm gebarsten.",
+        ):
+            result = evaluate("iPhone 15 scherm kapot", description)
+            assert result.accepted, (description, result.reason)
+
     def test_real_waterschade_still_hard_excluded(self):
         # The fix must not blunt the gate: a genuine exclude still fires,
         # even alongside an unrelated negation.

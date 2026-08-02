@@ -223,6 +223,16 @@ hard_excludes:
   - "sim locked"
   - "simlocked"
   - "sim-locked"
+  # Bare Dutch noun form (2026-08-02 probe review). The three English/past-
+  # participle spellings above all missed the way Dutch sellers actually
+  # write it, so "iPhone 15 Pro (onderdelen) - Simlock, kapot scherm"
+  # (m2424178572, 07-26) sailed through the hard-exclude gate and
+  # auto-accepted on the 'kapot scherm' primary keyword - alerted with NO
+  # AI review, the same blind spot class as the July "voor onderdelen"
+  # leak. Safe as a bare substring: every other "simlock" title in 4 weeks
+  # of DB history is a negation form (simlockvrij / zonder simlock /
+  # simlock vrij), and negations are stripped before this gate runs.
+  - "simlock"
   - "corrosie"
   # Counterfeit/replica phones - found in production: "voor onderdelen"
   # matched a "Namaak iPhone" (fake iPhone) listing, since that keyword
@@ -322,6 +332,7 @@ negation_phrases:
   - "geen simlock"
   - "simlockvrij"
   - "simlock vrij"
+  - "zonder simlock"   # seen live 2026-08-02; bare "simlock" now hard-excludes
   - "geen moederbord"     # "geen moederbord schade" / "...problemen"
   - "niet namaak"
   - "geen replica"
