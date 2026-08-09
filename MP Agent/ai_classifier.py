@@ -103,6 +103,22 @@ DECISION RULE - apply it mechanically:
 - Damage that was ALREADY REPAIRED ("scherm vervangen", "gerepareerd",
   "onder garantie hersteld") is not a defect - the phone works and needs
   no repair. Relevant only if a CURRENT, unrepaired defect remains.
+- DAMAGE ASSERTED BUT NOT SPECIFIED -> relevant: true. If the listing
+  states the phone is damaged/broken (schade, beschadigd, gebroken,
+  kapot, defect) but never says WHICH part, do NOT reject for lack of
+  detail. Marktplaats truncates descriptions to ~230 characters, so the
+  sentence naming the part is very often simply cut off, and sellers
+  routinely point at photos instead ("zie foto's"). Missing information
+  is a platform artefact, not evidence of expensive damage - never
+  reason that unspecified damage is "likely" a board fault or "probably"
+  a write-off. Most damaged iPhones on this site have exactly the cheap
+  screen or back-glass damage the user wants, so an unspecified defect
+  is far more likely to be in-category than out. This applies on ALL
+  models 14-17: with no named defect there is nothing for the 17-gen
+  battery/charging exclusion to apply to, so it does NOT apply.
+  This rule needs damage to be ASSERTED. It does not apply when the
+  listing simply says nothing about condition, nor when it describes a
+  working phone - those are still rejects.
 - Reject only when every described defect falls outside the categories,
   or there is no actual defect at all (seller just selling a fine phone).
 
@@ -128,6 +144,15 @@ Examples:
 - "iPhone 15 Pro, scherm onlangs vervangen vanwege defect, werkt nu
   perfect" -> relevant: false (already repaired - no current defect
   remains).
+- "Werkende iphone 15. Toestel is beschadigd, zie foto's voor de
+  staat." -> relevant: true (damage is asserted; the description is
+  truncated and points at photos, so the part is unnamed - that is
+  missing information, NOT evidence of expensive damage. A working
+  phone that is nonetheless damaged is the ideal buy).
+- "iPhone 16 Pro Max voor onderdelen. Waarschijnlijk iCloud-slot, kreeg
+  hem zo." -> relevant: false (damage is unspecified, but a hard-exclude
+  signal IS named - iCloud lock. The unspecified-damage rule never
+  overrides an explicitly stated deep fault).
 
 You will be given a Dutch marketplace listing's title and description.
 It's been flagged for one of three reasons: it contains an ambiguous term
@@ -140,7 +165,10 @@ seller described the damage in their own words and you need to judge
 whether it plausibly falls in the cheap-repair categories.
 
 Decide: does this listing's actual described condition plausibly match a
-cheap screen/back-cover/charging-port/battery/camera-lens repair? Reply
+cheap screen/back-cover/charging-port/battery/camera-lens repair? Note
+"plausibly" - you are not being asked to confirm the defect, only to
+judge whether it could be one of these. If damage is asserted but the
+part is never named, the answer is yes. Reply
 with ONLY a JSON object, no other text:
 {"relevant": true or false, "reason": "one short sentence in English"}
 """
