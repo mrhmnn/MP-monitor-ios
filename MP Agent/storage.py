@@ -260,6 +260,35 @@ def bump_health_counter(key: str, failed: bool, db_path: Path = DB_PATH) -> int:
     return value
 
 
+def get_health_value(key: str, db_path=None):
+    """
+    Read a raw scan_health value, or None if the key was never written.
+
+    db_path resolves at CALL time rather than defaulting to DB_PATH in the
+    signature: a `db_path: Path = DB_PATH` default is bound at import, so
+    monkeypatching storage.DB_PATH in a test silently has no effect and the
+    test writes to the real database instead. main.py calls these without a
+    path, so they need to be patchable.
+    """
+    db_path = db_path or DB_PATH
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT value FROM scan_health WHERE key = ?", (key,)
+        ).fetchone()
+    return row[0] if row else None
+
+
+def set_health_value(key: str, value: int, db_path=None) -> None:
+    """Write a raw scan_health value (epoch seconds, counters, flags)."""
+    db_path = db_path or DB_PATH
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO scan_health (key, value) VALUES (?, ?)",
+            (key, int(value)),
+        )
+        conn.commit()
+
+
 def touch_last_seen(listing_id: str, db_path: Path = DB_PATH) -> None:
     """Update last_seen_utc to now for a listing we've encountered again."""
     with sqlite3.connect(db_path) as conn:

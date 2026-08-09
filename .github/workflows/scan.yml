@@ -3,15 +3,19 @@ name: Marktplaats iPhone Scan
 # Runs automatically every 30 minutes, and can also be triggered manually
 # from the Actions tab (useful for testing without waiting for the schedule).
 on:
-  # Note: GitHub's own scheduler never once fired in testing (confirmed
-  # with a 1-minute test cron running 15+ minutes with zero triggers, on
-  # top of a full overnight run at 30-min intervals with zero triggers).
-  # Actual automation now runs via an external cron-job.org job calling
-  # this workflow's dispatch endpoint every 8 minutes (verified live
-  # 2026-07-15 via `gh run list` - run durations average ~2.5 min, well
-  # under the gap, so no queue backup) - this schedule trigger is left in
-  # only as a harmless backup in case GitHub's scheduler starts working
-  # on its own later.
+  # Primary automation is an external cron-job.org job calling this
+  # workflow's dispatch endpoint every ~7 minutes (verified live 2026-07-15
+  # via `gh run list` - runs average ~2.5 min, well under the gap, so no
+  # queue backup).
+  #
+  # CORRECTION 2026-08-09: this comment used to say GitHub's own scheduler
+  # "never once fired in testing" and that the schedule below was a harmless
+  # backup. It DOES fire now - about 18-24 runs/day, roughly half the 48 the
+  # cron below asks for. That backup is not harmless: when the dispatcher
+  # died on 2026-08-06 it quietly absorbed the outage, so alerts kept
+  # arriving at ~1/hour instead of ~1/7min and nothing looked broken from a
+  # phone. It went unnoticed for 2.5 days. main.py's check_run_cadence()
+  # now watches the gap between runs specifically to catch that.
   schedule:
     - cron: "7,37 * * * *"
   workflow_dispatch:

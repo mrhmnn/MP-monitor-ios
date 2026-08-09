@@ -482,6 +482,19 @@ alert_max_query_failure_ratio: 0.25
 # behaviour.
 alert_health_consecutive_runs: 3
 
+# --- Dispatcher cadence watchdog (2026-08-09) ---
+# The checks above only inspect runs that HAPPENED. On 2026-08-06 the
+# external cron-job.org dispatcher stopped firing (expired GitHub PAT) and
+# it went unnoticed for 2.5 days, because GitHub's own `schedule:` cron kept
+# the workflow running at ~18-24/day instead of ~200 - so alerts still
+# arrived, just 8x slower, and nothing looked wrong from the phone.
+# Normal dispatcher gap is ~7 min; the GitHub fallback is ~30-60 min.
+alert_max_run_gap_minutes: 25
+alert_cadence_consecutive_runs: 3
+# At fallback cadence every run trips the check, so the warning is rate
+# limited to once every this many hours rather than ~24 times a day.
+alert_cadence_cooldown_hours: 12
+
 # --- High-value models (2026-07-28) ---
 # On these, the AI stops rejecting defects for being expensive to repair.
 # Rationale (measured 07-27): 17 Pro, 17 Pro Max and 16 Pro Max produced

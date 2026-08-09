@@ -130,8 +130,75 @@ def _send_bargains(listings, config: dict) -> int:
     return sent
 
 
+def check_run_cadence(config: dict) -> None:
+    """
+    Warn when the external cron-job.org dispatcher stops firing.
+
+    Added 2026-08-09 after the dispatcher went down at 17:49 UTC on 08-06 and
+    nobody noticed for 2.5 days. Nothing broke loudly, because GitHub's own
+    `schedule:` cron kept the workflow alive at ~18-24 runs/day instead of the
+    dispatcher's ~200 - so Telegram alerts kept arriving, just 8x slower, and
+    from a phone it looked completely normal. The 2026-07-28 health check
+    cannot see this: it inspects what a run FETCHED, so a run that never
+    happened is invisible to it. This is the only check that looks at time.
+
+    (Note: the "GitHub's scheduler never fires" comment in scan.yml is out of
+    date - it does fire now, roughly half the configured 7,37 * * * *. That
+    fallback is exactly what made the outage silent.)
+    """
+    now = int(time.time())
+    previous = storage.get_health_value("last_run_epoch")
+    storage.set_health_value("last_run_epoch", now)
+
+    if previous is None:
+        return                          # first run on a fresh DB
+
+    gap_minutes = (now - previous) / 60
+    max_gap = config.get("alert_max_run_gap_minutes", 25)
+    if gap_minutes <= max_gap:
+        storage.set_health_value("slow_cadence_runs", 0)
+        return
+
+    # Require consecutive slow gaps, same reasoning as the fetch-health
+    # hysteresis: a single skipped dispatcher fire is not an outage.
+    streak = (storage.get_health_value("slow_cadence_runs") or 0) + 1
+    storage.set_health_value("slow_cadence_runs", streak)
+    required = config.get("alert_cadence_consecutive_runs", 3)
+    if streak < required:
+        logger.warning(
+            "Slow cadence: %.0f min since last run (max %d) - run %d of %d "
+            "before alerting", gap_minutes, max_gap, streak, required,
+        )
+        return
+
+    # Cooldown: at fallback cadence this condition is true on EVERY run, so
+    # without it the warning would fire ~24x a day and get muted immediately.
+    cooldown_hours = config.get("alert_cadence_cooldown_hours", 12)
+    last_alert = storage.get_health_value("cadence_alert_epoch") or 0
+    if now - last_alert < cooldown_hours * 3600:
+        return
+
+    sent = telegram_notifier.send_message(
+        "⚠️ <b>Scraper cadence dropped</b>\n"
+        f"Last {streak} runs averaged over {gap_minutes:.0f} min apart "
+        f"(expected ~7 min). The scan itself is fine - this is the external "
+        f"<b>cron-job.org</b> dispatcher not firing, so the workflow is "
+        f"coasting on GitHub's own ~hourly cron.\n\n"
+        "Usual cause: the GitHub PAT it authenticates with expired. "
+        "Check the job at cron-job.org and re-paste a fresh token.\n"
+        "Alerts still arrive meanwhile, just far slower - good listings will "
+        "be gone before you see them."
+    )
+    storage.set_health_value("cadence_alert_epoch", now)
+    logger.warning(
+        "Cadence warning (gap %.0f min, streak %d) - alert %s",
+        gap_minutes, streak, "sent" if sent else "FAILED TO SEND",
+    )
+
+
 def run_scan_cycle(config: dict) -> None:
     storage.init_db()
+    check_run_cadence(config)
 
     total_fetched = 0
     total_new = 0
