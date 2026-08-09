@@ -23,6 +23,15 @@ DAMAGE = ["barst","breuk","gebroken","broken","kapot","scheur","beschadig","scha
 
 NEG = ("geen","niet","zonder","nooit")
 
+# 2026-08-09 fix: terms above are matched as prefixes on purpose ("barst" ->
+# "barsten"/"barstje", "beschadig" -> "beschadigd"). For a few of them a
+# common inflection is a *different word*: Dutch "stuk" = broken, but "stuks"
+# / "stukken" = units, as in "97 stuks iphone 16" - a wholesaler bulk lot that
+# filters.py rejects correctly. Those were the only two DISAGREEMENT probe
+# hits in the 2026-08-09 review window, i.e. 100% of the probe's output was
+# this one substring collision.
+SUFFIX_TRAPS = {"stuk": ("s", "ken")}
+
 def _norm(s):
     s = (s or "").lower()
     s = re.sub(r"[^a-z0-9 ]+", " ", s)
@@ -31,14 +40,18 @@ def _norm(s):
 def _negation_aware_hits(text):
     hits = []
     for w in DAMAGE:
+        # Scan every occurrence, not just the first: a discarded first hit
+        # ("geen barst", or the "stuks" trap) used to hide a real later one.
         i = text.find(w)
-        if i == -1:
-            continue
-        before = text[:i].split()[-4:]
-        after = text[i+len(w):i+len(w)+5]
-        if any(x in NEG for x in before) or after.startswith(("vrij","loos")):
-            continue          # "geen barst", "krasvrij"
-        hits.append(w)
+        while i != -1:
+            before = text[:i].split()[-4:]
+            after = text[i+len(w):i+len(w)+5]
+            if not (any(x in NEG for x in before)
+                    or after.startswith(("vrij","loos"))
+                    or after.startswith(SUFFIX_TRAPS.get(w, ()))):
+                hits.append(w)   # not "geen barst" / "krasvrij" / "97 stuks"
+                break
+            i = text.find(w, i + 1)
     return hits
 
 
