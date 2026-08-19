@@ -171,6 +171,25 @@ class TestGates:
         result = evaluate("iPhone 15 scherm kapot", "incl. 2 stuks hoesjes")
         assert result.accepted
 
+    def test_partij_lot_rejected(self):
+        # Real leak 2026-08-13: "Partij iphones - iphone 14 pro - iphone 15 -
+        # iphone 15 pro" was auto-passed to AI review, which judged the one
+        # iPhone 15's broken back cover on its own merits and alerted. "N
+        # stuks" missed it because the lot states no count; the target-model
+        # filter missed it because the lot names modern models.
+        result = evaluate(
+            "Partij iphones - iphone 14 pro - iphone 15 - iphone 15 pro",
+            "iphone 15 met gebroken achterkant",
+        )
+        assert not result.accepted
+        assert not result.needs_ai_review
+
+    def test_partij_in_description_does_not_reject(self):
+        # Title-scoped on purpose: a genuine single-phone seller mentioning a
+        # "partij hoesjes" in the description must still get through.
+        result = evaluate("iPhone 16 Pro gebarsten achterkant", "krijgt er een partij hoesjes bij")
+        assert "partij" not in result.reason
+
     def test_i_phone_with_space_matches_target_model(self):
         # Real production miss 2026-07-15: m2420319890, "I phone 15 pro
         # 256 gb" - none of target_models' substrings match "I phone" with

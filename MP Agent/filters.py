@@ -156,6 +156,25 @@ def is_bulk_lot(text: str) -> bool:
     return _BULK_LOT_RE.search(text) is not None
 
 
+# The other half of the lot vocabulary: Dutch "partij X" = "batch/lot of X",
+# and lot sellers put it in the *title*. "N stuks" alone missed these because
+# most partij lots never state a count ("Partij diverse iPhones"). They were
+# passing only by accident - the target-model filter killed them, because lots
+# usually list old models (5C/6S/3GS). That accident fails exactly when a lot
+# does contain modern phones: "Partij iphones - iphone 14 pro - iphone 15 -
+# iphone 15 pro" reached AI review, which judged the one iPhone 15's broken
+# back cover on its own merits and alerted (real, 2026-08-13).
+# Title-scoped on purpose: a real single-phone seller can mention a "partij"
+# of accessories in the description, but never titles their ad that way. Of
+# all 105 partij-titled listings seen since 2026-07-06, every one is a lot and
+# none is a single target phone - so this costs zero recall.
+_BULK_PARTIJ_RE = re.compile(r"\bpartij(en)?\b", re.IGNORECASE)
+
+
+def is_bulk_partij(title: str) -> bool:
+    return _BULK_PARTIJ_RE.search(title) is not None
+
+
 def is_business_listing(text: str, indicators: list[str], threshold: int) -> bool:
     return _count_matches(text, indicators) >= threshold
 
@@ -282,6 +301,12 @@ def evaluate_listing(
         return FilterResult(
             accepted=False,
             reason="bulk lot (N stuks) - wholesaler clearing inventory, not a single flip",
+        )
+
+    if is_bulk_partij(title):
+        return FilterResult(
+            accepted=False,
+            reason="bulk lot ('partij' in title) - wholesaler lot, not a single flip",
         )
 
     if is_business_listing(
