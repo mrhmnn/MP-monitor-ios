@@ -119,6 +119,20 @@ DECISION RULE - apply it mechanically:
   This rule needs damage to be ASSERTED. It does not apply when the
   listing simply says nothing about condition, nor when it describes a
   working phone - those are still rejects.
+- OFFERING THE PHONE "VOOR ONDERDELEN" / "voor reparatie" / "voor iemand
+  die handig is" / "sloop" IS such an assertion, and falls under the rule
+  above even though no part is named. Sellers use this framing to set
+  buyer expectations and price low - it is not a diagnosis. Do NOT infer
+  hidden deep damage from the phrase alone: if no board / water / iCloud /
+  counterfeit problem is actually NAMED, treat it as an unknown-but-
+  probably-fixable defect and answer relevant: true. A phone the seller
+  has already written off is precisely where the margin is. This holds on
+  ALL models 14-17, not only the expensive ones - the phrase is evidence
+  about the seller's expectations, not about the repair bill.
+  Two things this does NOT cover: a listing selling a PART or accessory
+  rather than a whole phone ("iPhone 16 Pro onderdeel - achter camera", a
+  loose screen, a bare housing), and a repair shop advertising its
+  services. Both are still rejects.
 - Reject only when every described defect falls outside the categories,
   or there is no actual defect at all (seller just selling a fine phone).
 
@@ -149,6 +163,11 @@ Examples:
   truncated and points at photos, so the part is unnamed - that is
   missing information, NOT evidence of expensive damage. A working
   phone that is nonetheless damaged is the ideal buy).
+- "Defecte iPhone 15 voor onderdelen, scherm en behuizing intact." ->
+  relevant: true (parts framing is not evidence of a board fault; no
+  deep-fault signal is named, so this is an unknown-but-probably-fixable
+  defect - and the intact screen and housing make a cheap repair more
+  likely, not less).
 - "iPhone 16 Pro Max voor onderdelen. Waarschijnlijk iCloud-slot, kreeg
   hem zo." -> relevant: false (damage is unspecified, but a hard-exclude
   signal IS named - iCloud lock. The unspecified-damage rule never
@@ -226,10 +245,11 @@ the defect disclosed. On this listing only:
 - BATTERY and CHARGING PORT faults are relevant on 17-gen too (the base
   prompt's "17-gen battery/charging is too expensive" exclusion does NOT
   apply to these models).
-- "VOOR ONDERDELEN" / "voor reparatie" / "voor iemand die handig is" with
-  no specific defect named IS relevant. Do not infer hidden deep damage
-  from the phrase alone - if the seller named no board/water/iCloud
-  problem, treat it as an unknown-but-probably-fixable defect and accept.
+- (The "voor onderdelen" / "voor reparatie" rule is no longer listed here:
+  as of 2026-08-19 it lives in the base prompt and applies to every model
+  14-17. It was never a value-tier judgment - the phrase says what the
+  seller expects, not what the repair costs. Nothing changes for these
+  models; the rule simply is not exclusive to them anymore.)
 - Still reject: water damage, motherboard/logic-board failure, iCloud lock,
   counterfeit/replica, and listings with NO defect at all. Those are real
   write-offs, not priced-in risk.
