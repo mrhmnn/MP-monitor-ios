@@ -194,6 +194,15 @@ hard_excludes:
   - "icloud-lock"
   - "icloud-vergrendeling"
   - "icloud vergrendeling"
+  # The participle, not just the noun (2026-08-19). "iCloud vergrendeld" is
+  # how sellers actually write it, and it was missing - "iPhone 15 Pro
+  # Titanium - iCloud vergrendeld (voor onderdelen)" reached AI review and
+  # was caught by the prompt alone. Same class as the 08-02 bare-"simlock"
+  # gap. Kept iCloud-qualified on purpose: bare "vergrendeld" also means
+  # "simkaart vergrendeld" and "vergrendeld toegangsscherm", which are not
+  # iCloud locks. Both hyphen forms needed - normalize_text keeps hyphens.
+  - "icloud vergrendeld"
+  - "icloud-vergrendeld"
   - "icloud geblokkeerd"
   - "activatieslot"
   - "activatie slot"

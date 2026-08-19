@@ -171,6 +171,27 @@ class TestGates:
         result = evaluate("iPhone 15 scherm kapot", "incl. 2 stuks hoesjes")
         assert result.accepted
 
+    def test_icloud_vergrendeld_participle_hard_excluded(self):
+        # 2026-08-19: hard_excludes had the noun ("icloud vergrendeling")
+        # but not the participle sellers actually write. "iPhone 15 Pro
+        # Titanium - iCloud vergrendeld (voor onderdelen)" reached AI review
+        # and was caught by the prompt alone - fragile, and the same class as
+        # the 08-02 bare-"simlock" gap. Both hyphen forms, since
+        # normalize_text keeps hyphens.
+        for title in (
+            "iPhone 15 Pro Titanium - iCloud vergrendeld (voor onderdelen)",
+            "iPhone 15 Pro - iCloud-vergrendeld",
+        ):
+            result = evaluate(title, "")
+            assert not result.accepted
+            assert not result.needs_ai_review
+
+    def test_simkaart_vergrendeld_is_not_an_icloud_lock(self):
+        # The exclude stays iCloud-qualified: a SIM-locked phone with a
+        # broken screen is still a target, and so is a locked lock-screen.
+        result = evaluate("iPhone 16 Pro 128GB Simkaart vergrendeld, scherm kapot", "")
+        assert result.accepted
+
     def test_partij_lot_rejected(self):
         # Real leak 2026-08-13: "Partij iphones - iphone 14 pro - iphone 15 -
         # iphone 15 pro" was auto-passed to AI review, which judged the one
