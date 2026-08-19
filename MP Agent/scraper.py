@@ -109,6 +109,9 @@ class ListingDetails:
     # "posted 6 days ago" call for completely different urgency - and a
     # listing that has sat unsold for days is usually telling you something.
     posted_iso: str = ""
+    # Listing photos, so the re-check tool can give the classifier the same
+    # visual evidence a live scan does (2026-08-19).
+    image_urls: list[str] = field(default_factory=list)
 
 
 def fetch_listing_details(url: str, user_agent: str) -> ListingDetails:
@@ -168,6 +171,19 @@ def fetch_listing_details(url: str, user_agent: str) -> ListingDetails:
                     details.posted_iso = dt.isoformat()
                 except (ValueError, IndexError):
                     pass
+
+            # Photos live under listing.gallery.imageUrls on the VIP page
+            # (the search API uses a different `pictures` shape). The URLs
+            # carry a "$_#.jpg" size placeholder; _image_blocks substitutes
+            # a concrete size code before downloading.
+            gallery = listing.get("gallery")
+            if isinstance(gallery, dict):
+                for raw in gallery.get("imageUrls", []) or []:
+                    if not isinstance(raw, str) or not raw:
+                        continue
+                    details.image_urls.append(
+                        "https:" + raw if raw.startswith("//") else raw
+                    )
     return details
 
 
