@@ -123,7 +123,11 @@ def recheck(db_path: str, days: int, limit: int, send: bool) -> int:
         ai_input = f"{title}\n{details.description}" if details.description else title
         high_value = models.parse_model(title) in high_value_models
         verdict = ai_classifier.classify_ambiguous_listing(
-            ai_input, config["ai_model"], high_value=high_value
+            ai_input,
+            config["ai_model"],
+            high_value=high_value,
+            image_urls=getattr(details, "image_urls", None),
+            max_images=config.get("ai_max_images", 3),
         )
 
         if not verdict.relevant:

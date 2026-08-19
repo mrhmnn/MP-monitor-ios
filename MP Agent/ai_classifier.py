@@ -12,7 +12,10 @@ Uses Haiku, not Sonnet: this is a cheap, high-volume classification task,
 not something that needs frontier reasoning. See project notes on cost.
 """
 
+import base64
 import json
+
+import httpx
 import logging
 import os
 from dataclasses import dataclass
@@ -133,6 +136,17 @@ DECISION RULE - apply it mechanically:
   rather than a whole phone ("iPhone 16 Pro onderdeel - achter camera", a
   loose screen, a bare housing), and a repair shop advertising its
   services. Both are still rejects.
+- PHOTOS: listing images are attached when the seller provided them. USE
+  THEM - they are evidence, equal in weight to the text. Sellers constantly
+  write "zie foto's" and name nothing, and on this marketplace the picture
+  IS the description. If you can see a crack, a shattered panel, a damaged
+  back, lines or spots on the display, judge on that and name what you saw.
+  A photo showing real damage OVERRIDES a vague or reassuring text. Note
+  what photos cannot settle: water damage, board faults, iCloud lock and
+  Face ID are invisible, so never infer them from an image - and a phone
+  that merely LOOKS clean is not proof it works, since the defect may be
+  internal or on a face not pictured. Absence of visible damage is
+  therefore not evidence against a defect the seller has asserted.
 - Reject only when every described defect falls outside the categories,
   or there is no actual defect at all (seller just selling a fine phone).
 
@@ -258,13 +272,62 @@ the defect disclosed. On this listing only:
 """
 
 
+def _image_blocks(image_urls: list[str] | None, limit: int) -> list[dict]:
+    """Download listing photos and return them as Anthropic image blocks.
+
+    Half of these listings describe the damage as "zie foto's" and say nothing
+    else - the picture IS the description. Judging those on text alone is
+    guessing, which is what produced a run of "no specific defect named"
+    rejects on phones that were plainly cracked in the photo.
+
+    Best-effort by design: a photo that will not download is skipped rather
+    than failing the listing, because a text-only verdict is still far better
+    than no verdict. Marktplaats serves these from images.marktplaats.com with
+    a size rule in the URL; "$_86" is a large-but-not-huge variant, enough to
+    see a crack without paying for a full-resolution upload.
+    """
+    if not image_urls:
+        return []
+
+    blocks: list[dict] = []
+    for url in image_urls[:limit]:
+        if url.startswith("//"):
+            url = "https:" + url
+        url = url.replace("$_#.jpg", "$_86.jpg")
+        try:
+            resp = httpx.get(url, timeout=15, follow_redirects=True)
+            resp.raise_for_status()
+            media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+            if not media_type.startswith("image/"):
+                continue
+            blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": base64.standard_b64encode(resp.content).decode("ascii"),
+                },
+            })
+        except Exception as exc:  # noqa: BLE001 - a missing photo must not sink the listing
+            logger.debug("could not attach listing image %s: %s", url, exc)
+    return blocks
+
+
 def classify_ambiguous_listing(
-    listing_text: str, model: str, high_value: bool = False
+    listing_text: str,
+    model: str,
+    high_value: bool = False,
+    image_urls: list[str] | None = None,
+    max_images: int = 3,
 ) -> AiVerdict:
     """
     Send one ambiguous listing to Haiku for a relevance judgment.
     Fails safe: if anything goes wrong, treat it as NOT relevant rather than
     risk spamming a notification for something we couldn't actually verify.
+
+    Photos are attached when available (2026-08-19). Text-only judgment was
+    the single biggest remaining source of wrongly-rejected deals: sellers
+    routinely point at the pictures instead of naming the broken part.
     """
     try:
         # Inside the try on purpose: a missing ANTHROPIC_API_KEY used to raise
@@ -275,11 +338,13 @@ def classify_ambiguous_listing(
         # left unseen and retried once the key works.
         client = _get_client()
         system = SYSTEM_PROMPT + HIGH_VALUE_SUFFIX if high_value else SYSTEM_PROMPT
+        content: list[dict] = _image_blocks(image_urls, max_images)
+        content.append({"type": "text", "text": listing_text[:1500]})
         response = client.messages.create(
             model=model,
-            max_tokens=100,
+            max_tokens=150,
             system=system,
-            messages=[{"role": "user", "content": listing_text[:1500]}],
+            messages=[{"role": "user", "content": content}],
         )
         raw = response.content[0].text.strip()
         # Strip accidental markdown fences, just in case

@@ -264,7 +264,11 @@ def run_scan_cycle(config: dict) -> None:
                         config.get("high_value_models", [])
                     )
                     verdict = ai_classifier.classify_ambiguous_listing(
-                        ai_input, config["ai_model"], high_value=high_value
+                        ai_input,
+                        config["ai_model"],
+                        high_value=high_value,
+                        image_urls=listing.image_urls,
+                        max_images=config.get("ai_max_images", 3),
                     )
                     accepted = verdict.relevant
                     reason = f"AI review: {verdict.reason}"

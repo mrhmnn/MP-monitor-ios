@@ -525,6 +525,13 @@ alert_cadence_cooldown_hours: 12
 # 15 Pro (24) and 16 Pro (3) instead - both comfortably high-value
 # (verkocht €472 and €650) and both listed several times a day. Excluding
 # them would have left the policy technically live and practically inert.
+# How many listing photos to send to the classifier (2026-08-19). The AI
+# reads the pictures now, because sellers routinely describe the damage as
+# "zie foto's" and nothing else. 3 is a deliberate balance: the damage shot
+# is usually among the first few, and each image adds tokens to a call that
+# runs on every ambiguous listing. 0 disables vision entirely.
+ai_max_images: 3
+
 high_value_models:
   - "iphone 15 pro"
   - "iphone 16 pro"

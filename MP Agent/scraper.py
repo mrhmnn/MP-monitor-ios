@@ -26,7 +26,7 @@ extraction against a live query.
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 from urllib.parse import quote
@@ -64,6 +64,11 @@ class Listing:
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     image_url: str = ""
+    # Every photo on the listing, not just the one Telegram shows. The AI
+    # classifier reads these (2026-08-19): sellers constantly describe the
+    # damage as "zie foto's" and nothing else, and the crack is as likely to
+    # be on photo 3 as photo 1.
+    image_urls: list[str] = field(default_factory=list)
     # Structured seller signals from the embedded JSON (search results only,
     # not available via the HTML fallback) - used by filters.py to reject
     # repair shops / professional sellers cheaply.
@@ -367,6 +372,24 @@ def _listing_from_item(item: dict) -> Listing:
                 or first_pic.get("extraExtraLargeUrl")
                 or ""
             )
+    # Every picture, for the AI classifier (Telegram still uses image_url).
+    all_image_urls: list[str] = []
+    if pictures and isinstance(pictures, list):
+        for pic in pictures:
+            if not isinstance(pic, dict):
+                continue
+            candidate = (
+                pic.get("largeUrl")
+                or pic.get("mediumUrl")
+                or pic.get("extraExtraLargeUrl")
+                or pic.get("url")
+                or ""
+            )
+            if candidate:
+                if candidate.startswith("//"):
+                    candidate = "https:" + candidate
+                all_image_urls.append(candidate)
+
     # Fallback to imageUrls if pictures didn't yield anything
     if not image_url:
         image_urls = item.get("imageUrls", [])
@@ -402,6 +425,7 @@ def _listing_from_item(item: dict) -> Listing:
         latitude=location.get("latitude"),
         longitude=location.get("longitude"),
         image_url=image_url,
+        image_urls=all_image_urls or ([image_url] if image_url else []),
         seller_name=seller.get("sellerName", ""),
         seller_has_website=bool(seller.get("showWebsiteUrl", False)),
         priority_product=item.get("priorityProduct", "NONE") or "NONE",
