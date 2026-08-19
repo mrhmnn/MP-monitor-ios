@@ -136,8 +136,10 @@ DECISION RULE - apply it mechanically:
   rather than a whole phone ("iPhone 16 Pro onderdeel - achter camera", a
   loose screen, a bare housing), and a repair shop advertising its
   services. Both are still rejects.
-- PHOTOS: listing images are attached when the seller provided them. USE
-  THEM - they are evidence, equal in weight to the text. Sellers constantly
+- PHOTOS: images are attached only when the seller pointed at them instead
+  of naming the damage ("zie foto's"). When they are there, read them and
+  say what you can see broken. When they are not, judge on the text alone -
+  never ask for photos or complain that none were provided. Sellers constantly
   write "zie foto's" and name nothing, and on this marketplace the picture
   IS the description. If you can see a crack, a shattered panel, a damaged
   back, lines or spots on the display, judge on that and name what you saw.
@@ -197,12 +199,27 @@ damage-focused search but matched no known damage keyword - meaning the
 seller described the damage in their own words and you need to judge
 whether it plausibly falls in the cheap-repair categories.
 
-Decide: does this listing's actual described condition plausibly match a
-cheap screen/back-cover/charging-port/battery/camera-lens repair? Note
-"plausibly" - you are not being asked to confirm the defect, only to
-judge whether it could be one of these. If damage is asserted but the
-part is never named, the answer is yes. Reply
-with ONLY a JSON object, no other text:
+Two things are asked of you, and the SECOND matters more:
+
+1. "relevant": does the described condition plausibly match a cheap
+   screen / back-cover / charging-port / battery / camera-lens repair?
+   "Plausibly" - you are not confirming the defect, only judging whether
+   it could be one of these. If damage is asserted but the part is never
+   named, the answer is yes.
+
+2. "reason": SAY WHAT IS BROKEN, in one short sentence. This string is
+   shown to the user in the alert he reads on his phone, before he opens
+   the ad - it is the whole point of this call. Name the part and the
+   fault ("cracked back glass, screen intact", "won't power on, no cause
+   given", "screen has green lines"). Lead with the damage.
+   If the listing names no defect at all, say what the listing IS
+   instead, briefly ("sealed new phone, no defect stated", "shop
+   advertisement", "phone case only") - never write "cannot assess" or
+   "no information", and never explain your own reasoning about the
+   categories above. He is reading this to decide whether to open the
+   ad, not to audit your verdict.
+
+Reply with ONLY a JSON object, no other text:
 {"relevant": true or false, "reason": "one short sentence in English"}
 """
 
@@ -272,6 +289,15 @@ the defect disclosed. On this listing only:
 """
 
 
+# Marktplaats serves each photo at a size code in the URL. Haiku bills images
+# at roughly (width * height) / 750 tokens, so this choice is the whole image
+# cost: "86" is 900x1600 (~1920 tokens/image), "84" is 498x885 (~588). At three
+# photos a call that is 5760 vs 1764 tokens - measured 2026-08-19, and at
+# ~45 ambiguous listings/day the difference is about EUR 5/month. 498px wide is
+# still plenty to see a cracked screen or back, which is all this pass judges.
+_IMAGE_SIZE_CODE = "84"
+
+
 def _image_blocks(image_urls: list[str] | None, limit: int) -> list[dict]:
     """Download listing photos and return them as Anthropic image blocks.
 
@@ -293,7 +319,7 @@ def _image_blocks(image_urls: list[str] | None, limit: int) -> list[dict]:
     for url in image_urls[:limit]:
         if url.startswith("//"):
             url = "https:" + url
-        url = url.replace("$_#.jpg", "$_86.jpg")
+        url = url.replace("$_#.jpg", "$_" + _IMAGE_SIZE_CODE + ".jpg")
         try:
             resp = httpx.get(url, timeout=15, follow_redirects=True)
             resp.raise_for_status()
@@ -321,13 +347,24 @@ def classify_ambiguous_listing(
     max_images: int = 3,
 ) -> AiVerdict:
     """
-    Send one ambiguous listing to Haiku for a relevance judgment.
-    Fails safe: if anything goes wrong, treat it as NOT relevant rather than
-    risk spamming a notification for something we couldn't actually verify.
+    Ask Haiku what the damage on this listing actually is.
 
-    Photos are attached when available (2026-08-19). Text-only judgment was
-    the single biggest remaining source of wrongly-rejected deals: sellers
-    routinely point at the pictures instead of naming the broken part.
+    NOT A GATE (2026-08-20, Milad's call: "i only want the ai review for
+    context in the alerts to specify the damage but alert me either way,
+    don't make the ai review the decider"). main.py alerts on every listing
+    that reaches this function regardless of what comes back; `relevant` is
+    kept only so the reason string can be labelled, and `reason` is the
+    product - it is what gets written into the Telegram alert so he knows
+    what is broken before opening the ad.
+
+    The real gate is filters.py: target model, hard excludes (iCloud, water,
+    board, counterfeit), bulk lots, buyer ads, business sellers, distance.
+    A listing this function sees has already passed all of that.
+
+    Photos are attached ONLY when the caller passes them, and main.py passes
+    them only when the listing points at its pictures instead of naming the
+    damage ("zie foto's"). They cost ~588 tokens each and are useless when
+    the seller already said what is broken.
     """
     try:
         # Inside the try on purpose: a missing ANTHROPIC_API_KEY used to raise

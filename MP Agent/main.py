@@ -13,6 +13,7 @@ long-running process. Example crontab entry for every 3 hours:
 """
 
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -34,6 +35,16 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("main")
+
+# Sellers who never name the damage and just point at the pictures. Only these
+# listings get their photos sent to the classifier - everywhere else the text
+# already says what is broken, and images are pure token cost (2026-08-20).
+_POINTS_AT_PHOTOS_RE = re.compile(
+    r"zie\s+(de\s+)?(foto|foto's|fotos|afbeelding|plaatjes|beelden)"
+    r"|op\s+de\s+foto"
+    r"|see\s+(the\s+)?photo",
+    re.IGNORECASE,
+)
 
 
 def load_config() -> dict:
@@ -263,16 +274,32 @@ def run_scan_cycle(config: dict) -> None:
                     high_value = models.parse_model(listing.title) in set(
                         config.get("high_value_models", [])
                     )
+                    # Photos cost ~588 tokens each and are pointless when the
+                    # seller already named the damage. Attach them only when
+                    # the listing tells the reader to go look at the pictures
+                    # instead (2026-08-20).
+                    points_at_photos = _POINTS_AT_PHOTOS_RE.search(ai_input) is not None
                     verdict = ai_classifier.classify_ambiguous_listing(
                         ai_input,
                         config["ai_model"],
                         high_value=high_value,
-                        image_urls=listing.image_urls,
+                        image_urls=listing.image_urls if points_at_photos else None,
                         max_images=config.get("ai_max_images", 3),
                     )
-                    accepted = verdict.relevant
-                    reason = f"AI review: {verdict.reason}"
-                    if not accepted and verdict.reason.startswith("classification error"):
+                    # THE AI IS NOT THE DECIDER (2026-08-20, Milad: "i only
+                    # want the ai review for context in the alerts to specify
+                    # the damage but alert me either way"). Everything that
+                    # reaches AI review alerts; the verdict only decides how
+                    # the reason line is phrased. filters.py remains the real
+                    # gate - target model, hard excludes, bulk lots, buyer
+                    # ads, business sellers, distance.
+                    accepted = True
+                    reason = (
+                        f"AI review: {verdict.reason}"
+                        if verdict.relevant
+                        else f"AI review (no clear target defect): {verdict.reason}"
+                    )
+                    if verdict.reason.startswith("classification error"):
                         # API failure, not a judgment (e.g. 529 overloaded).
                         # Don't mark seen: the next run (~8 min) will retry.
                         # Found in the 07-18 probe review: three listings were
@@ -284,8 +311,11 @@ def run_scan_cycle(config: dict) -> None:
                         )
                         continue
                     logger.info(
-                        "AI verdict for '%s': %s - %s",
-                        listing.title, "RELEVANT" if accepted else "rejected", verdict.reason,
+                        "AI context for '%s': %s%s - %s",
+                        listing.title,
+                        "RELEVANT" if verdict.relevant else "no clear target defect",
+                        " [photos read]" if points_at_photos else "",
+                        verdict.reason,
                     )
                 elif not accepted and not reason.startswith("not a target model"):
                     # Recall probe (logging only, replaces the lost

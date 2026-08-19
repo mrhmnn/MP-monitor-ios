@@ -175,6 +175,30 @@ def is_bulk_partij(title: str) -> bool:
     return _BULK_PARTIJ_RE.search(title) is not None
 
 
+# Accessory listings: a case, a screen protector, a charging cable. Not phones,
+# so never an AI judgment call - "is this a phone" belongs in the filter, the
+# same place "is this a target model" already lives (2026-08-20). Before this,
+# ~8 accessory listings a day reached AI review, and once the AI stopped
+# gating they would have alerted.
+#
+# The accessory word must BE the product, not merely mentioned: either the
+# title opens with it ("Screenprotector iPhone 11 pro"), or the accessory is
+# offered *voor* a phone ("Wave Hoesje voor iPhone 12 Pro Max"). A real
+# damaged phone that happens to include a case - "iPhone 15 met hoesje en
+# gebarsten achterkant" - says the accessory late and without "voor", so it
+# passes. Verified against all 428 alerted listings in history: zero blocked.
+# Known miss, deliberately: "Bluebolt iPhone 17 metalen hoes" (brand-first,
+# no "voor"). Letting one case through beats blocking one real phone.
+_ACCESSORY_RE = re.compile(
+    r"^\W*(?:\w+\s+){0,1}(?:hoesje|hoesjes|hoes|telefoonhoesje|telefoonhoesjes|screenprotector|screen ?protector|beschermglas|tempered ?glass|privacy ?glas|oplader|oplaadkabel|adapter|earpods|airpods|oordopjes|bumper)\b|\b(?:hoesje|hoesjes|hoes|telefoonhoesje|telefoonhoesjes|screenprotector|screen ?protector|beschermglas|tempered ?glass|privacy ?glas|oplader|oplaadkabel|adapter|earpods|airpods|oordopjes|bumper)\b[^,]{0,40}?\bvoor\b",
+    re.IGNORECASE,
+)
+
+
+def is_accessory_listing(title: str) -> bool:
+    return _ACCESSORY_RE.search(title) is not None
+
+
 def is_business_listing(text: str, indicators: list[str], threshold: int) -> bool:
     return _count_matches(text, indicators) >= threshold
 
@@ -307,6 +331,12 @@ def evaluate_listing(
         return FilterResult(
             accepted=False,
             reason="bulk lot ('partij' in title) - wholesaler lot, not a single flip",
+        )
+
+    if is_accessory_listing(title):
+        return FilterResult(
+            accepted=False,
+            reason="accessory listing (case/protector/cable), not a phone",
         )
 
     if is_business_listing(
