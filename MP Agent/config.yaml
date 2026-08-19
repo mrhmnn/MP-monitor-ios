@@ -207,6 +207,17 @@ hard_excludes:
   - "activatieslot"
   - "activatie slot"
   - "waterschade"
+  # Spaced and English forms (2026-08-20). Marktplaats does no stemming and
+  # sellers write it both ways: m2431660013 ("Iphone 17 pro max 256 GB
+  # (defect)" / "Door water schade werkt hij niet meer") slipped the one-word
+  # form and reached AI review. That was survivable while the AI still gated;
+  # now that filters.py is the only gate, a missed spelling means a
+  # water-damaged write-off lands in Telegram. Same class as the 08-02
+  # bare-"simlock" and 08-19 "icloud vergrendeld" gaps.
+  # Validated: 23 water-variant titles in history, none ever alerted.
+  - "water schade"
+  - "water damage"
+  - "waterdamage"
   # Lock / dead-phone signals (added 2026-07-22 after these auto-accepted via
   # the old "voor onderdelen" primary keyword). Carrier/activation locks and
   # permanent blocks make the phone unsellable; corrosion is water/board.

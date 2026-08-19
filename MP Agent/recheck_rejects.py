@@ -43,6 +43,7 @@ from pathlib import Path
 import yaml
 
 import ai_classifier
+import main
 import models
 import scraper
 import telegram_notifier
@@ -126,7 +127,13 @@ def recheck(db_path: str, days: int, limit: int, send: bool) -> int:
             ai_input,
             config["ai_model"],
             high_value=high_value,
-            image_urls=getattr(details, "image_urls", None),
+            # Same rule as the live scan: photos only when the seller points
+            # at them instead of naming the damage (2026-08-20).
+            image_urls=(
+                getattr(details, "image_urls", None)
+                if main._POINTS_AT_PHOTOS_RE.search(ai_input)
+                else None
+            ),
             max_images=config.get("ai_max_images", 3),
         )
 
