@@ -1,0 +1,74 @@
+name: Re-check Old Rejects
+
+# Manual only. Run this after any prompt or filter change that LOOSENS a
+# rejection - it re-runs the current classifier over listings the old one
+# turned down, and alerts on the ones that now pass.
+#
+# Why it exists: the scanner never looks at a listing twice, so every prompt
+# fix strands the listings the old prompt got wrong. They age out of the
+# newest-30 fetch window in a day or two and are never reconsidered.
+# /requeue-listing cannot recover them for exactly that reason - deleting a
+# seen-row only helps while the listing is still inside some query's window.
+# After 901f9c2 (2026-08-19) five still-live phones were sitting rejected on
+# reasoning the current prompt no longer endorses, and Milad found them by
+# hand.
+#
+# Read-only with respect to the data branch: it never writes the database, so
+# it cannot lose a concurrent scan's state (the 2026-07-13 force-push race).
+# That is also why a flipped listing keeps its old rejected row - the alert is
+# the point.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How many days back to re-check"
+        required: false
+        default: "14"
+      limit:
+        description: "Max listings to re-classify (caps Haiku spend)"
+        required: false
+        default: "40"
+      telegram:
+        description: "Send a Telegram alert for each flipped listing"
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  recheck:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: "MP Agent"
+
+    steps:
+      - name: Check out repository (main branch, for code)
+        uses: actions/checkout@v4
+
+      - name: Restore database from data branch
+        working-directory: ${{ github.workspace }}
+        run: |
+          git fetch origin data
+          git checkout origin/data -- "MP Agent/seen_listings.db"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: "MP Agent/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Re-check old rejects
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python recheck_rejects.py \
+            --days "${{ inputs.days }}" \
+            --limit "${{ inputs.limit }}" \
+            ${{ inputs.telegram && '--telegram' || '' }}
