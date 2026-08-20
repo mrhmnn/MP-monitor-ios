@@ -156,6 +156,38 @@ def test_a_damaged_phone_still_alerts_with_the_ai_sentence(scan):
     assert _row("m1")[1] == "alerted"
 
 
+def test_parts_framing_is_not_a_no_defect_listing(scan):
+    """"voor onderdelen" is a buy signal, and the gate must never eat it.
+
+    Measured over DB history: 39 parts-framed listings reached AI review and
+    not one came back "no clear target defect" - the prompt treats the phrase
+    as damage ASSERTED but unnamed, which is relevant by rule. This pins the
+    end of that chain: the verdict it produces still alerts.
+    """
+    sent = scan["run"](
+        _listing(title="Iphone 15 voor onderdelen", description="Zie foto's."),
+        ai_classifier.AiVerdict(
+            True, "Damage asserted via 'voor onderdelen' with no deep fault named."
+        ),
+    )
+    assert len(sent) == 1
+
+
+def test_a_failed_ai_call_is_retried_not_buried(scan):
+    """An API error is not a verdict.
+
+    This mattered less while everything alerted regardless; with the gate on,
+    a 529 that got recorded as "not relevant" would bury the listing forever.
+    It must stay unseen so the next run (~8 min later) tries again.
+    """
+    sent = scan["run"](
+        _listing(title="iPhone 15 Pro met schade", description="Zie foto's."),
+        ai_classifier.AiVerdict(False, "classification error: overloaded_error"),
+    )
+    assert sent == []
+    assert storage.get_seen_record("m1") is None
+
+
 def test_the_gate_can_be_switched_off(scan):
     scan["config"]["ai_gates_alerts"] = False
     sent = scan["run"](
