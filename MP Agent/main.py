@@ -81,11 +81,16 @@ def _send_bargains(listings, config: dict) -> int:
             listing.title, listing.description_snippet, config,
             seller_has_website=listing.seller_has_website,
             priority_product=listing.priority_product,
+            seller_is_verified=listing.seller_is_verified,
         )
         if verdict.reason.startswith((
             "seller has a business website", "paid promoted listing",
             "bulk lot", "looks like a business", "looks like a 'wanted",
             "title mentions LCD",
+            # A cheap case is exactly the shape of a "90% under market"
+            # bargain, and a shop's refurb listing of the same shape is
+            # still a shop (2026-08-20).
+            "accessory listing", "verified/business seller",
         )):
             logger.info(
                 "Bargain skipped '%s': %s", listing.title, verdict.reason
@@ -247,6 +252,7 @@ def run_scan_cycle(config: dict) -> None:
                     config,
                     seller_has_website=listing.seller_has_website,
                     priority_product=listing.priority_product,
+                    seller_is_verified=listing.seller_is_verified,
                 )
 
                 accepted = result.accepted
@@ -286,14 +292,28 @@ def run_scan_cycle(config: dict) -> None:
                         image_urls=listing.image_urls if points_at_photos else None,
                         max_images=config.get("ai_max_images", 3),
                     )
-                    # THE AI IS NOT THE DECIDER (2026-08-20, Milad: "i only
-                    # want the ai review for context in the alerts to specify
-                    # the damage but alert me either way"). Everything that
-                    # reaches AI review alerts; the verdict only decides how
-                    # the reason line is phrased. filters.py remains the real
-                    # gate - target model, hard excludes, bulk lots, buyer
-                    # ads, business sellers, distance.
-                    accepted = True
+                    # NO-DEFECT GATE (2026-08-20 #2, Milad: "used products
+                    # giving me alerts"). Earlier the same day the AI was
+                    # demoted to a describe-only role and EVERYTHING reaching
+                    # review alerted - which handed him a stream of undamaged
+                    # phones: "sealed refurbished phone, no defect stated",
+                    # "used phone in near-new condition", "shop advertisement
+                    # for a working used phone", "surface scratches on intact
+                    # screen". Those are the verdicts where the AI is doing
+                    # the one job the keyword filter cannot: reading a Dutch
+                    # description and seeing there is no defect at all.
+                    #
+                    # So the verdict gates again - but its ROLE is unchanged
+                    # for everything that passes: the alert still carries the
+                    # AI's sentence describing the damage. What it may not do
+                    # is silently swallow a real defect, which is why the
+                    # prompt forbids cost/model-year reasoning and treats
+                    # unspecified damage and "voor onderdelen" as relevant.
+                    # Flip ai_gates_alerts to false to get the alert-either-way
+                    # behaviour back in one line.
+                    accepted = verdict.relevant or not config.get(
+                        "ai_gates_alerts", True
+                    )
                     reason = (
                         f"AI review: {verdict.reason}"
                         if verdict.relevant

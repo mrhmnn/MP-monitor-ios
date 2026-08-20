@@ -181,22 +181,77 @@ def is_bulk_partij(title: str) -> bool:
 # ~8 accessory listings a day reached AI review, and once the AI stopped
 # gating they would have alerted.
 #
-# The accessory word must BE the product, not merely mentioned: either the
-# title opens with it ("Screenprotector iPhone 11 pro"), or the accessory is
-# offered *voor* a phone ("Wave Hoesje voor iPhone 12 Pro Max"). A real
-# damaged phone that happens to include a case - "iPhone 15 met hoesje en
-# gebarsten achterkant" - says the accessory late and without "voor", so it
-# passes. Verified against all 428 alerted listings in history: zero blocked.
-# Known miss, deliberately: "Bluebolt iPhone 17 metalen hoes" (brand-first,
-# no "voor"). Letting one case through beats blocking one real phone.
+# Rule 1 (position): the accessory word must BE the product - either the title
+# opens with it ("Screenprotector iPhone 11 pro"), or the accessory is offered
+# *voor* a phone ("Wave Hoesje voor iPhone 12 Pro Max").
+_ACCESSORY_NOUN = (
+    r"(?:hoesje|hoesjes|hoes|hoezen|telefoonhoes|telefoonhoesje|telefoonhoesjes"
+    r"|case|cases|cover|covers"
+    r"|screenprotector|screen ?protector|beschermglas|tempered ?glass|privacy ?glas"
+    r"|oplader|oplaadkabel|adapter|earpods|airpods|oordopjes|bumper)"
+)
+
 _ACCESSORY_RE = re.compile(
-    r"^\W*(?:\w+\s+){0,1}(?:hoesje|hoesjes|hoes|telefoonhoesje|telefoonhoesjes|screenprotector|screen ?protector|beschermglas|tempered ?glass|privacy ?glas|oplader|oplaadkabel|adapter|earpods|airpods|oordopjes|bumper)\b|\b(?:hoesje|hoesjes|hoes|telefoonhoesje|telefoonhoesjes|screenprotector|screen ?protector|beschermglas|tempered ?glass|privacy ?glas|oplader|oplaadkabel|adapter|earpods|airpods|oordopjes|bumper)\b[^,]{0,40}?\bvoor\b",
+    rf"^\W*(?:\w+\s+){{0,1}}{_ACCESSORY_NOUN}\b"
+    rf"|\b{_ACCESSORY_NOUN}\b[^,]{{0,40}}?\bvoor\b",
     re.IGNORECASE,
 )
 
+# Rule 2 (brand-first cases, added 2026-08-20 #2): position alone let a whole
+# class of case listings through, because sellers put the brand and the phone
+# model in front of the accessory word and never write "voor" - four of them
+# alerted on 08-20 ("Rode iPhone 15 Plus Silicone Case met MagSafe", "OtterBox
+# Lumen Series Apple iPhone 15 Pro Clear Case", "Nieuwe Pitaka Edge Case voor
+# iPhone 16 Pro", "iPhone 15 Pro Max Clear Case met MagSafe"), plus the
+# "Bluebolt iPhone 17 metalen hoes" the position rule was documented as
+# missing. What they all share is a case-TYPE word glued to the noun, which a
+# phone listing has no reason to contain.
+_ACCESSORY_QUALIFIER = (
+    r"(?:clear|silicone|siliconen|leather|leren|kunstleer|magsafe|book|wallet"
+    r"|portemonnee|pasjes|flip|flipcase|folio|tpu|hardcase|hard|soft|metalen"
+    r"|metal|transparant|transparante|doorzichtig|edge|shockproof|waterproof"
+    r"|waterdicht|waterdichte|armor|rugged|glitter|tough|fashion)"
+)
+_ACCESSORY_PAIR_RE = re.compile(
+    rf"\b{_ACCESSORY_QUALIFIER}[\s-]*{_ACCESSORY_NOUN}\b", re.IGNORECASE
+)
+
+# ...unless the case is being thrown IN with a phone. "iPhone 13 128GB Groen -
+# Inc Magsafe hoesje", "iPhone XS Max - Werkt goed, inclusief Apple leren
+# hoesje": an inclusion word right before the pair means the phone is the
+# product and the case is a freebie. Without this guard rule 2 blocks real
+# damaged phones, which is the one thing it must never do.
+_ACCESSORY_INCLUDED_RE = re.compile(
+    r"\b(incl|inclusief|inclusive|inc|met|gratis|erbij|bijgeleverd|inbegrepen)"
+    r"\b[\w\s.-]{0,12}$"
+    r"|\+\s*[\w\s.-]{0,12}$",
+    re.IGNORECASE,
+)
+
+# NOT used: Marktplaats' own "mobile_phones_cases_and_covers_apple_iphone"
+# category. It looks like the perfect free signal and it is a trap - checked
+# live 2026-08-20, EIGHT of the listings in it across five queries were real
+# phones, including "Iphone 15" with a gebroken achterkant and an "Iphone 15
+# roze" whose back is kapot. Sellers pick the category carelessly, exactly
+# like the July 2026 iPhone that sat under "Telefoon-opladers". Title text is
+# the only accessory signal that holds.
+
 
 def is_accessory_listing(title: str) -> bool:
-    return _ACCESSORY_RE.search(title) is not None
+    """True if the listing sells an accessory rather than a phone.
+
+    Validated against all 8826 listings in DB history: of the 32 titles the
+    brand-first rule newly blocks, every single one is a genuine accessory,
+    and no listing that ever alerted as a real phone is caught.
+    Known miss, deliberately: a case titled with no type word and no "voor"
+    at all. Letting one case through beats blocking one real phone.
+    """
+    if _ACCESSORY_RE.search(title):
+        return True
+    return any(
+        not _ACCESSORY_INCLUDED_RE.search(title[: match.start()])
+        for match in _ACCESSORY_PAIR_RE.finditer(title)
+    )
 
 
 def is_business_listing(text: str, indicators: list[str], threshold: int) -> bool:
@@ -249,6 +304,7 @@ def evaluate_listing(
     config: dict,
     seller_has_website: bool = False,
     priority_product: str = "NONE",
+    seller_is_verified: bool = False,
 ) -> FilterResult:
     """
     Main entry point.
@@ -302,6 +358,18 @@ def evaluate_listing(
         return FilterResult(
             accepted=False,
             reason=f"paid promoted listing ({priority_product}) - almost always a shop",
+        )
+    # sellerInformation.isVerified - Marktplaats' own verified/business badge
+    # (2026-08-20, Milad: "any seller which is verified/a business"). Measured
+    # live the same day across 346 listings from the damage queries: 11 were
+    # verified, and every one was a trader - the "Used Products" chain, "Best
+    # Buy Phone", "Smartphones Emmeloord", a bulk "partij" seller and two
+    # wanted-ads. Not one was a private seller with a broken phone. Stronger
+    # than showWebsiteUrl, which all 11 had set to false.
+    if config.get("reject_verified_sellers", True) and seller_is_verified:
+        return FilterResult(
+            accepted=False,
+            reason="verified/business seller (Marktplaats badge) - a shop, not a private seller",
         )
 
     # Every target model (14-17) ships with OLED, not LCD - Apple has never

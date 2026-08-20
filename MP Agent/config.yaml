@@ -415,6 +415,13 @@ max_distance_km: 200
 # broken phone essentially never.
 reject_seller_with_website: true
 reject_priority_listings: true
+# seller_is_verified: sellerInformation.isVerified, Marktplaats' own
+# verified-seller badge (2026-08-20). Measured live that day over 346
+# listings from the damage queries: 11 verified sellers, all traders -
+# "Used Products", "Best Buy Phone", "Smartphones Emmeloord", a partij
+# seller, two wanted-ads. None had showWebsiteUrl set, so this catches a
+# class the two switches above miss entirely.
+reject_verified_sellers: true
 
 # --- Market-price tracking (market.py) ---
 # Realistic per-model pricing built from what listings ACTUALLY go for:
@@ -462,6 +469,17 @@ bargain_max_alerts_per_run: 3
 
 # --- AI classifier ---
 ai_model: "claude-haiku-4-5-20251001"
+
+# Does the AI verdict decide whether an alert is sent? (2026-08-20)
+# true  = a "no defect at all" verdict rejects the listing (sealed/refurb/
+#         shop/near-new phones stop here); every alert still carries the
+#         AI's sentence describing the damage.
+# false = alert either way, AI text is context only. That was the setting
+#         for one day; it filled Telegram with undamaged used phones.
+# The prompt is deliberately recall-biased: unspecified damage and "voor
+# onderdelen" both count as relevant, and cost/model-year reasoning is
+# forbidden - so this rejects listings with NO defect, not expensive ones.
+ai_gates_alerts: true
 
 # Send target-model listings that matched NO damage keyword at all to the
 # AI as well (instead of silently rejecting them). Catches damage phrasings

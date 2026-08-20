@@ -34,14 +34,30 @@ without a login. Filters and the AI classifier are tuned around that.
 ## Decision pipeline (filters.py + ai_classifier.py)
 
 1. Target model (14–17) named in the title? No → reject.
-2. Business/shop signals, buyer ads, paid placements → reject.
-3. Hard excludes (iCloud lock, water damage, motherboard...) → reject.
-4. Primary damage keyword → accept (unless the title says "lees
+2. Business/shop signals, buyer ads, paid placements, and Marktplaats'
+   own verified-seller badge (`reject_verified_sellers`) → reject.
+3. Accessories — a case, screenprotector, cable — → reject, on the title
+   only: the accessory word leads the title, is followed by "voor", or
+   carries a case-type word ("Clear Case", "metalen hoes"). A case merely
+   *included* with a phone ("incl. hoesje") is not an accessory listing,
+   and Marktplaats' own `cases_and_covers` category is deliberately NOT
+   used — it is full of miscategorized real phones (checked live 08-20).
+4. Hard excludes (iCloud lock, water damage, motherboard...) → reject.
+5. Primary damage keyword → accept (unless the title says "lees
    beschrijving" → AI confirms first).
-5. Ambiguous damage term surviving negation-phrase stripping → Haiku
+6. Ambiguous damage term surviving negation-phrase stripping → Haiku
    judges it (model: see `ai_model` in config.yaml).
-6. No keyword at all but broad damage words survive negation stripping →
+7. No keyword at all but broad damage words survive negation stripping →
    Haiku judges it too.
+
+The Haiku verdict has two jobs, and the second is the bigger one: it
+**describes** the damage in the alert Milad reads, and it **rejects
+listings with no defect at all** — sealed/refurbished/near-new phones
+and shop ads that the keyword filter cannot tell from a damaged phone
+(`ai_gates_alerts`, set false to alert either way). It is deliberately
+not allowed to reject on repair cost: the prompt forbids cost and
+model-year reasoning, and treats unspecified damage and "voor
+onderdelen" as relevant.
 
 Every decision (accept/reject + reason) is logged at INFO and stored in
 the `reason` column of `seen_listings` — diagnosing "why didn't I get an

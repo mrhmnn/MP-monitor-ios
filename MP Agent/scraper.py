@@ -74,6 +74,10 @@ class Listing:
     # repair shops / professional sellers cheaply.
     seller_name: str = ""
     seller_has_website: bool = False
+    # sellerInformation.isVerified - Marktplaats' verified-seller badge. In a
+    # live 346-listing sample (2026-08-20) every verified seller on the damage
+    # queries was a shop or a bulk trader, so filters.py rejects on it.
+    seller_is_verified: bool = False
     # "NONE" for normal listings; "DAGTOPPER"/"TOPADVERTENTIE" are paid
     # promoted placements - private individuals dumping a broken phone
     # almost never pay to promote, repair shops constantly do.
@@ -444,6 +448,7 @@ def _listing_from_item(item: dict) -> Listing:
         image_urls=all_image_urls or ([image_url] if image_url else []),
         seller_name=seller.get("sellerName", ""),
         seller_has_website=bool(seller.get("showWebsiteUrl", False)),
+        seller_is_verified=bool(seller.get("isVerified", False)),
         priority_product=item.get("priorityProduct", "NONE") or "NONE",
         price_cents=int(price_info.get("priceCents") or 0),
         price_type=price_info.get("priceType", "") or "",
