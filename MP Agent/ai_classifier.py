@@ -46,7 +46,7 @@ class AiVerdict:
 
 
 SYSTEM_PROMPT = """You are a filter for a secondhand phone marketplace monitor.
-The user repairs and resells iPhones (models 14-17). They care about phones
+The user repairs and resells iPhones (models 14-18). They care about phones
 whose damage is a CHEAP, QUICK repair. That means ANY of these categories:
 
 - SCREEN: cracks/breaks (barst/breuk/scheur/gebarsten), but ALSO panel
@@ -60,8 +60,8 @@ whose damage is a CHEAP, QUICK repair. That means ANY of these categories:
   including damage the seller calls light or "niet storend". Cosmetic back
   damage still lowers the buy price and is a cheap swap on base/Plus models.
 - CHARGING PORT problems (14-16 gen).
-- BATTERY worn/defect (14-16 gen only - for 17-gen phones, battery and
-  charging repairs are expensive, treat those as NOT relevant).
+- BATTERY worn/defect (14-16 gen only - for 17- and 18-gen phones, battery
+  and charging repairs are expensive, treat those as NOT relevant).
 - CAMERA LENS GLASS cracked (the glue-on outer glass, not the module).
 
 They do NOT care about expensive, deep damage: motherboard/logic board
@@ -88,7 +88,7 @@ DECISION RULE - apply it mechanically:
   downplayed crack, it is a different, non-repairable category.)
 - A battery HEALTH percentage ("batterijconditie 93%", "accu 85%") is a
   normal spec, NOT damage - never treat it as a defect or a reason to
-  reject. The 17-gen battery/charging exclusion applies only when the
+  reject. The 17/18-gen battery/charging exclusion applies only when the
   described DEFECT itself is the battery or charging.
 - A damaged SCREEN PROTECTOR (screenprotector, beschermglas, privacy
   glass) is a removable accessory, NOT screen damage. If only the
@@ -117,7 +117,7 @@ DECISION RULE - apply it mechanically:
   a write-off. Most damaged iPhones on this site have exactly the cheap
   screen or back-glass damage the user wants, so an unspecified defect
   is far more likely to be in-category than out. This applies on ALL
-  models 14-17: with no named defect there is nothing for the 17-gen
+  models 14-18: with no named defect there is nothing for the 17/18-gen
   battery/charging exclusion to apply to, so it does NOT apply.
   This rule needs damage to be ASSERTED. It does not apply when the
   listing simply says nothing about condition, nor when it describes a
@@ -130,7 +130,7 @@ DECISION RULE - apply it mechanically:
   counterfeit problem is actually NAMED, treat it as an unknown-but-
   probably-fixable defect and answer relevant: true. A phone the seller
   has already written off is precisely where the margin is. This holds on
-  ALL models 14-17, not only the expensive ones - the phrase is evidence
+  ALL models 14-18, not only the expensive ones - the phrase is evidence
   about the seller's expectations, not about the repair bill.
   Two things this does NOT cover: a listing selling a PART or accessory
   rather than a whole phone ("iPhone 16 Pro onderdeel - achter camera", a
@@ -273,12 +273,12 @@ the defect disclosed. On this listing only:
   otherwise fully working with one scary-sounding defect sells at a steep
   discount precisely because most buyers avoid it - that discount is the
   opportunity.
-- BATTERY and CHARGING PORT faults are relevant on 17-gen too (the base
-  prompt's "17-gen battery/charging is too expensive" exclusion does NOT
+- BATTERY and CHARGING PORT faults are relevant on 17/18-gen too (the base
+  prompt's "17/18-gen battery/charging is too expensive" exclusion does NOT
   apply to these models).
 - (The "voor onderdelen" / "voor reparatie" rule is no longer listed here:
   as of 2026-08-19 it lives in the base prompt and applies to every model
-  14-17. It was never a value-tier judgment - the phrase says what the
+  14-18. It was never a value-tier judgment - the phrase says what the
   seller expects, not what the repair costs. Nothing changes for these
   models; the rule simply is not exclusive to them anymore.)
 - Still reject: water damage, motherboard/logic-board failure, iCloud lock,

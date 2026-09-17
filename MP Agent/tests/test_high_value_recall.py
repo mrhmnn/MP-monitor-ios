@@ -33,6 +33,10 @@ def test_covered_models_are_the_pro_tier():
     assert HIGH_VALUE == {
         "iphone 15 pro", "iphone 16 pro", "iphone 16 pro max",
         "iphone 17 pro", "iphone 17 pro max",
+        # 18 Pro / Pro Max joined on launch (2026-09-17) - newest and
+        # priciest models in scope, and rare enough for months that waiting
+        # for them to "prove" a rejection rate would leave the policy inert.
+        "iphone 18 pro", "iphone 18 pro max",
     }
 
 

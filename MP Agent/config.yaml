@@ -36,10 +36,12 @@ search_queries:
   - "iphone 15 defect"
   - "iphone 16 defect"
   - "iphone 17 defect"
+  - "iphone 18 defect"
   # - "iphone 14 kapot"
   - "iphone 15 kapot"
   - "iphone 16 kapot"
   - "iphone 17 kapot"
+  - "iphone 18 kapot"
   # Added — broader damage phrasing not covered by the queries above
   - "iphone display kapot"
   - "iphone touchscreen kapot"
@@ -55,6 +57,7 @@ search_queries:
   - "iphone 15 schade"
   - "iphone 16 schade"
   - "iphone 17 schade"
+  - "iphone 18 schade"
   # Common seller typo of "beschadigd" - Marktplaats search does no
   # stemming, so "iphone beschadigd"-style queries never match it (the
   # m2419022529 listing wrote "Achterkant is beschadigt", verified live).
@@ -69,6 +72,7 @@ search_queries:
   - "iphone 15 barst"
   - "iphone 16 barst"
   - "iphone 17 barst"
+  - "iphone 18 barst"
   # Added 2026-07-14 - won't-power-on listings are in scope again (decision:
   # often a dead battery/screen, not a board). Without a query they'd never
   # be fetched at all - the same fetch-gap class as the "schade"/"barst"
@@ -117,6 +121,13 @@ target_models:
   - "iphone16"
   - "iphone 17"
   - "iphone17"
+  # iPhone 18 added 2026-09-17, the day after Milad asked. Announced
+  # 2026-09-09 as Pro / Pro Max only (the base 18 and 18e are a spring-2027
+  # launch), but the bare "iphone 18" entries go in now anyway: they are
+  # substrings of "iPhone 18 Pro", so they cover the shipping models today
+  # and the base model the moment it exists, with nothing to remember later.
+  - "iphone 18"
+  - "iphone18"
   # - "iph 14"
   # - "iph14"
   - "iph 15"
@@ -125,6 +136,8 @@ target_models:
   - "iph16"
   - "iph 17"
   - "iph17"
+  - "iph 18"
+  - "iph18"
 
 # --- Primary damage keywords (auto-match if present, unless excluded below) ---
 # These represent "cheap, quick fix" damage - the profitable target range.
@@ -423,6 +436,21 @@ reject_priority_listings: true
 # class the two switches above miss entirely.
 reject_verified_sellers: true
 
+# --- Foldable iPhone (2026-09-17, Milad: "i dont want the fold in my
+# messages") ---
+# Apple's first foldable shipped 2026-09-09 as the iPhone Duo, at EUR 1999+.
+# It is out of scope: a foldable's failure mode is the inner flexible panel
+# and the hinge, neither of which is the cheap glue-and-swap repair this
+# whole monitor is built around, and there is no aftermarket part supply yet.
+# Needed because the target_models filter cannot see it - sellers write
+# "iPhone 18 Duo" and "iPhone 18 Fold" constantly even though neither is the
+# official name, and "iphone 18" is a substring of both, so the Duo would
+# ride in on the iPhone 18 entries added above.
+# Title-scoped and word-bounded on purpose (see filters._FOLDABLE_RE): a
+# description mentioning the Duo must not kill a real 18 Pro listing, and a
+# substring match would reject "folder" and "duopack" alike.
+reject_foldables: true
+
 # --- Market-price tracking (market.py) ---
 # Realistic per-model pricing built from what listings ACTUALLY go for:
 # bids (scraped per listing page) and listings that disappear within days
@@ -435,6 +463,7 @@ market_queries:
   - "iphone 15"
   - "iphone 16"
   - "iphone 17"
+  - "iphone 18"
 # Detail-page fetches are the expensive part, so both are capped per run
 # (runs every ~8 min via the external dispatcher, so even 10-20 per run
 # covers thousands per day).
@@ -567,4 +596,12 @@ high_value_models:
   - "iphone 16 pro max"
   - "iphone 17 pro"
   - "iphone 17 pro max"
+  # The 18 Pro / Pro Max join on day one (2026-09-17). Same argument that
+  # widened this list on 07-28, only stronger: they are the newest and most
+  # expensive models in scope, so the margin easily absorbs a pricier repair,
+  # and as a brand-new generation they will be rare on Marktplaats for months
+  # - exactly the volume-driven zero-alert pattern that made restricting this
+  # policy to the "proven" models inert last time.
+  - "iphone 18 pro"
+  - "iphone 18 pro max"
 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"

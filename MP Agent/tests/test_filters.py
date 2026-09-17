@@ -390,3 +390,61 @@ class TestAiResponseParsing:
             '[{"relevant": true, "reason": "Cracked back"}]'
         )
         assert parsed["relevant"] is True
+
+
+# --- iPhone 18 generation + foldable exclusion (2026-09-17) -----------------
+
+class TestGeneration18AndFoldables:
+    """Apple announced the 18 Pro / Pro Max and its first foldable (the
+    iPhone Duo) on 2026-09-09. Milad wants the 18 alerting and the foldable
+    kept out - and "iphone 18" is a substring of the "iPhone 18 Duo" titles
+    sellers write, so the two halves have to be tested together."""
+
+    def test_18_pro_with_screen_damage_is_accepted(self):
+        result = evaluate("iPhone 18 Pro Max 256GB", "Scherm gebarsten, werkt verder prima.")
+        assert result.accepted
+
+    def test_18_abbreviated_title_is_accepted(self):
+        result = evaluate("IPH 18 Pro kapot scherm", "Gevallen, scherm kapot.")
+        assert result.accepted
+
+    def test_18_bare_number_fallback_is_enabled(self):
+        # enabled_generations() reads the config, so the bare-number path
+        # only covers the 18 once target_models actually lists it.
+        assert "18" in filters.enabled_generations(CONFIG["target_models"])
+        assert filters.matches_target_model_fallback(
+            "18 Pro 256 gb met kapot scherm", "iphone, gevallen"
+        )
+
+    def test_18_parses_for_the_market_benchmark(self):
+        import models
+        assert models.parse_model("iPhone 18 Pro Max 256GB kapot scherm") == "iphone 18 pro max"
+
+    def test_foldable_duo_is_rejected_despite_damage(self):
+        result = evaluate("iPhone 18 Duo 512GB", "Binnenscherm gebarsten, buitenkant gaaf.")
+        assert not result.accepted
+        assert not result.needs_ai_review
+        assert "foldable" in result.reason
+
+    def test_foldable_fold_spelling_is_rejected(self):
+        result = evaluate("Apple iPhone 18 Fold - scherm kapot", "Gevallen.")
+        assert not result.accepted
+        assert "foldable" in result.reason
+
+    def test_dutch_foldable_wording_is_rejected(self):
+        result = evaluate("Vouwbare iPhone 18, scherm kapot", "Gevallen.")
+        assert not result.accepted
+
+    def test_folder_is_not_a_foldable(self):
+        # Word-bounded on purpose: substring matching would kill every
+        # listing that says "folder" or "duopack".
+        assert not filters.is_foldable("iphone 17 pro kapot scherm, zie folder")
+        assert not filters.is_foldable("iphone 16 pro duopack hoesjes erbij")
+
+    def test_duo_in_description_does_not_reject_a_real_18_pro(self):
+        # Title-scoped: a seller mentioning they also own a Duo must not
+        # disqualify the damaged 18 Pro they are actually selling.
+        result = evaluate(
+            "iPhone 18 Pro 256GB", "Scherm kapot. Ik heb ook nog een iPhone Duo te koop."
+        )
+        assert result.accepted

@@ -6,7 +6,7 @@ kept separate from scraping and notification so it's easy to test and
 tune independently (this is the part you'll iterate on the most).
 
 Decision flow for a single listing (title + description combined as `text`):
-  1. Does it mention a target model (14/15/16)? If not -> reject.
+  1. Does it mention a target model (14-18)? If not -> reject.
   2. Does it look like a business/shop listing, or a "wanted to buy" ad? If so -> reject.
   3. Does it contain a hard-exclude term (icloud lock, waterschade, etc)? If so -> reject.
   4. Is it a bulk lot ("N stuks")? If so -> reject.
@@ -99,11 +99,11 @@ def matches_target_model(text: str, target_models: list[str]) -> bool:
 # "14"-"17" digit; the description check in matches_target_model_fallback
 # is what actually keeps this safe from false-matching unrelated listings.
 _BARE_MODEL_RE = re.compile(
-    r"\b(1[4-7])\b[^\d]{0,15}?(pro\s*max|pro|plus|max|\d{2,4}\s*gb|\d{2,4}gb)",
+    r"\b(1[4-8])\b[^\d]{0,15}?(pro\s*max|pro|plus|max|\d{2,4}\s*gb|\d{2,4}gb)",
     re.IGNORECASE,
 )
 
-_GENERATION_RE = re.compile(r"\b(1[4-7])\b")
+_GENERATION_RE = re.compile(r"\b(1[4-8])\b")
 
 
 def enabled_generations(target_models: list[str]) -> set[str]:
@@ -111,7 +111,7 @@ def enabled_generations(target_models: list[str]) -> set[str]:
 
     Needed because target_models is the single place a generation gets
     enabled/disabled (the iPhone 14 was switched off 2026-07-23), but the
-    bare-number fallback below matched 14-17 from a hardcoded regex range.
+    bare-number fallback below matched a hardcoded 14-17 regex range.
     Without this, disabling "iphone 14" in config still let a title like
     "14 Pro Max kapot scherm" through the fallback path - the config
     switch would have been half-effective in a way that's invisible until
@@ -134,7 +134,7 @@ def matches_target_model_fallback(
     category page, since the bare regex alone is deliberately loose.
 
     `target_models` gates which generations count; omitting it keeps the
-    old "any of 14-17" behavior for callers that don't have the config.
+    old "any of 14-18" behavior for callers that don't have the config.
     """
     match = _BARE_MODEL_RE.search(title)
     if not match:
@@ -254,6 +254,34 @@ def is_accessory_listing(title: str) -> bool:
     )
 
 
+# Foldables (2026-09-17, Milad: "i dont want the fold in my messages"). The
+# iPhone Duo, Apple's first foldable, shipped alongside the 18 Pro - its inner
+# flexible panel and hinge are nothing like the cheap screen/back-glass swap
+# this monitor exists to find, and no aftermarket part supply exists yet.
+#
+# target_models can't express this: "iphone 18" is a substring of the
+# "iPhone 18 Duo" / "iPhone 18 Fold" titles sellers actually write (neither is
+# the official name, both are what people call it), so every foldable would
+# ride in on the iPhone 18 entries. Same shape as the LCD and accessory
+# checks - "is this even the right kind of product" belongs in the filter, not
+# in an AI judgment call.
+#
+# Word boundaries, not substrings: bare "fold" would reject every listing
+# saying "folder", and bare "duo" every "duopack"/"duo hoesje". Title-only for
+# the reason the model check is title-only - a seller mentioning they also own
+# a Duo must not disqualify their damaged 18 Pro.
+_FOLDABLE_RE = re.compile(
+    r"\b(?:duo|fold|folds|foldable|vouwbaar|vouwbare|opvouwbaar|opvouwbare"
+    r"|vouwtelefoon|vouwscherm)\b",
+    re.IGNORECASE,
+)
+
+
+def is_foldable(title: str) -> bool:
+    """True if the title sells a foldable iPhone (iPhone Duo / "18 Fold")."""
+    return _FOLDABLE_RE.search(title) is not None
+
+
 def is_business_listing(text: str, indicators: list[str], threshold: int) -> bool:
     return _count_matches(text, indicators) >= threshold
 
@@ -309,7 +337,7 @@ def evaluate_listing(
     """
     Main entry point.
 
-    IMPORTANT: model matching (14/15/16/17) is checked against the TITLE
+    IMPORTANT: model matching (14-18) is checked against the TITLE
     only, not the full description. Sellers reliably state what they're
     actually selling in the title; checking the description too caused
     false positives in production - e.g. an iPhone 12 listing whose
@@ -372,7 +400,7 @@ def evaluate_listing(
             reason="verified/business seller (Marktplaats badge) - a shop, not a private seller",
         )
 
-    # Every target model (14-17) ships with OLED, not LCD - Apple has never
+    # Every target model (14-18) ships with OLED, not LCD - Apple has never
     # put an LCD panel on any of them. So "lcd" in the TITLE of one of
     # these listings isn't describing the phone's actual screen - it's
     # someone selling a cheap aftermarket replacement LCD part, or a
@@ -383,10 +411,16 @@ def evaluate_listing(
     # mention "lcd" incidentally (e.g. quoting a repair quote they got),
     # which shouldn't disqualify them - only the title is a reliable
     # signal of what's actually being sold.
+    if config.get("reject_foldables", True) and is_foldable(title_lower):
+        return FilterResult(
+            accepted=False,
+            reason="foldable iPhone (Duo/Fold) - hinge and inner flexible panel are outside the cheap-repair model",
+        )
+
     if re.search(r"\blcd\b", title_lower):
         return FilterResult(
             accepted=False,
-            reason="title mentions LCD - target models (14-17) are OLED-only, so this is a spare part/repair listing, not a phone",
+            reason="title mentions LCD - target models (14-18) are OLED-only, so this is a spare part/repair listing, not a phone",
         )
 
     if is_bulk_lot(combined_text):

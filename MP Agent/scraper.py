@@ -469,8 +469,8 @@ def _listing_from_item(item: dict) -> Listing:
 # (a sibling L2 category), so restricting to l2CategoryId=1953
 # (mobiele-telefoons-apple-iphone) silently excluded it before any keyword
 # matching even ran - not a filter miss, a category-scope miss (2026-07-14).
-# Safe to broaden: matches_target_model() already requires "iphone 14-17"/
-# "iph 14-17" in the title, so non-iPhone listings from the wider category
+# Safe to broaden: matches_target_model() already requires "iphone 14-18"/
+# "iph 14-18" in the title, so non-iPhone listings from the wider category
 # still get rejected downstream.
 LRP_API_URL = "https://www.marktplaats.nl/lrp/api/search"
 LRP_L1_CATEGORY_ID = 820   # telecommunicatie

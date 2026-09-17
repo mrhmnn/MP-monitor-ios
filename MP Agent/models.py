@@ -13,13 +13,15 @@ import filters
 
 # Regex for the exact model variant. Order matters: "pro max" before "pro".
 # The trailing (?![a-z0-9]) stops "iphone 16e"/"iphone 17e" from matching
-# as a base 16/17 - the e-models aren't tracked.
+# as a base 16/17 - the e-models aren't tracked. The 18 was added 2026-09-17;
+# it ships Pro-only for now, but the generation is listed bare so the base 18
+# and 18e parse correctly the moment they launch (spring 2027).
 # "iph" covers the common Marktplaats abbreviation ("IPH 14 Pro Max scherm
 # kapot") - the filter pipeline already accepts those titles via
 # target_models, but this parser silently dropped them from the market
 # tracker and the [MARKT] alert line.
 _MODEL_RE = re.compile(
-    r"iph(?:one)?\s*(14|15|16|17)(?:\s*(pro\s*max|promax|pro|plus))?(?![a-z0-9])",
+    r"iph(?:one)?\s*(14|15|16|17|18)(?:\s*(pro\s*max|promax|pro|plus))?(?![a-z0-9])",
     re.IGNORECASE,
 )
 
