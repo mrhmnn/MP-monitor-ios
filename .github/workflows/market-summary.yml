@@ -1,12 +1,26 @@
 name: Weekly Market Price Summary
 
 # Posts the per-model price benchmark (pricebench.py --summary) to Telegram
-# every Saturday just before the 16:30 weekly review. Read-only: restores
-# the database from the data branch but never writes back - the 30-min scan
+# every Saturday, ahead of the 16:30 weekly review. Read-only: restores
+# the database from the data branch but never writes back - the scan
 # workflow owns all state changes.
+#
+# CORRECTION 2026-10-03 (audit): this used to ask for "0 14" = 16:00 NL,
+# half an hour before the review. It never arrived then. Actual fire times
+# of all 11 runs, UTC: 17:33 16:57 16:40 16:27 17:27 14:14 14:15 15:02
+# 17:37 17:35 17:37 - only 2 of 11 near the intended time, and 8 of 11
+# AFTER the review, up to 3.5 hours late (19:37 NL on his phone). GitHub's
+# shared scheduler defers cron under load and the top of the hour is the
+# most contended minute there is.
+#
+# "35 11" buys a ~4h cushion and sits off the hour, so even the worst
+# observed delay still lands before 16:30. Arriving early costs nothing -
+# this is a snapshot, not a live feed. GitHub cron has no timezone support,
+# so one UTC slot has to cover both clocks: from 2026-10-25 (NL leaves
+# summer time) it reads 12:35 NL instead of 13:35, still comfortably early.
 on:
   schedule:
-    - cron: "0 14 * * 6"   # Sat 14:00 UTC = 16:00 NL (summer)
+    - cron: "35 11 * * 6"   # Sat 11:35 UTC - deliberately early, see above
   workflow_dispatch:
 
 jobs:
