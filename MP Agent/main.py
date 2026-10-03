@@ -291,6 +291,7 @@ def run_scan_cycle(config: dict) -> None:
     skipped_too_far = 0
     sent_matches = 0
     failed_sends = 0
+    reappear_alerts_sent = 0
 
     for query in config["search_queries"]:
         try:
@@ -449,22 +450,70 @@ def run_scan_cycle(config: dict) -> None:
                     listing.listing_id, listing.title, listing.url, accepted, reason
                 )
             else:
-                # Already processed before. Each scan only pulls the newest-30
-                # results per query, so a listing that's been off our radar
-                # for a while and just resurfaced was almost certainly
-                # relisted/bumped - re-notify on it if it was a match before.
-                # Otherwise it's just the same listing still sitting in the
-                # newest-30 window, or a previously-rejected one - nothing new.
-                reappeared = storage.check_reappeared(
-                    listing.listing_id, config.get("reappear_gap_hours", 24)
-                )
+                # Already processed before. A listing off our radar for a
+                # while and then back was probably relisted or bumped, and
+                # used to be worth a second ping if it matched the first time.
+                #
+                # NARROWED HARD 2026-10-03 (Milad: "I don't like reappeared
+                # after being online messages... if it's 1 day or 2 days after
+                # its first appearance I want to see it, but make sure that
+                # doesn't happen more than 1 time; also stop giving me all the
+                # alerts at once, I kept getting 20 alerts of reappeared
+                # models in a minute span").
+                #
+                # Three bounds now, each closing a different hole:
+                #
+                # 1. AGE. Only within reappear_max_age_days of FIRST sighting.
+                #    The old rule had no upper bound, so a phone first seen in
+                #    July could still re-ping in October. A relist is only
+                #    interesting while the phone is still fresh enough that
+                #    the sale plausibly just fell through.
+                # 2. ONCE. A listing can produce at most one re-alert ever
+                #    (reappear_alerted_utc). Nothing stopped a listing from
+                #    bouncing in and out of the newest-30 window week after
+                #    week, re-alerting every single time.
+                # 3. PER-RUN CAP. At most reappear_max_alerts_per_run in one
+                #    scan. This is the direct answer to the 20-in-a-minute
+                #    burst. The cause is not provable from what survives -
+                #    production logs age out in ~2 days and the DB never
+                #    recorded when a re-alert fired - but the mechanism that
+                #    fits is a seller bumping their whole inventory at once,
+                #    putting all of their listings back in the window in the
+                #    same run. A cap bounds it whatever the cause, the same
+                #    way bargain_max_alerts_per_run does for the koopje sweep.
+                #
+                # Note the premise was always shakier than it looked: the
+                # market subsystem's own closure check keeps finding these
+                # listings still live, just pushed out of the window by volume
+                # and surfacing again through a different query - so many
+                # "reappearances" were never relists at all.
+                reappeared = False
+                if (
+                    config.get("realert_on_reappear", True)
+                    and seen_record["matched"]
+                    and reappear_alerts_sent
+                    < config.get("reappear_max_alerts_per_run", 2)
+                ):
+                    reappeared = storage.check_reappeared(
+                        listing.listing_id,
+                        config.get("reappear_gap_hours", 24),
+                        max_age_days=config.get("reappear_max_age_days", 3),
+                    )
+                # Still touched regardless of any of the above: last_seen
+                # drives the market tracker's staleness and closure queue,
+                # which has nothing to do with whether we re-alert.
                 storage.touch_last_seen(listing.listing_id)
 
-                if not (reappeared and seen_record["matched"]):
+                if not reappeared:
                     continue
 
+                # Marked BEFORE the send, like the bargain sweep: a lost
+                # notification is far better than this listing re-alerting on
+                # every one of the ~200 runs a day.
+                storage.mark_reappear_alerted(listing.listing_id)
+                reappear_alerts_sent += 1
                 accepted = True
-                reason = "Reappeared after being off-market - originally matched"
+                reason = "Opnieuw online - matchte al eerder"
 
             if not accepted:
                 # INFO, not DEBUG: these lines are the first thing to grep

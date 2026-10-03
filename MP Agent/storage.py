@@ -10,6 +10,7 @@ import sqlite3
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,14 @@ def init_db(db_path: Path = DB_PATH) -> None:
         # both key off it, and changing its meaning would alter behaviour.
         if "outcome" not in existing_columns:
             conn.execute("ALTER TABLE seen_listings ADD COLUMN outcome TEXT")
+        # One re-alert per listing, ever (2026-10-03). Before this a listing
+        # bouncing in and out of the newest-30 window re-alerted every single
+        # time it came back - part of what produced the burst of ~20 reappear
+        # alerts in a minute that Milad reported.
+        if "reappear_alerted_utc" not in existing_columns:
+            conn.execute(
+                "ALTER TABLE seen_listings ADD COLUMN reappear_alerted_utc TEXT"
+            )
         # Cross-run counters for the scan health check (2026-07-28). Lives in
         # the DB because that's the only thing that survives between GitHub
         # Actions runs - the workflow pushes it to the `data` branch each run.
@@ -307,22 +316,68 @@ def touch_last_seen(listing_id: str, db_path: Path = DB_PATH) -> None:
         conn.commit()
 
 
-def check_reappeared(listing_id: str, gap_hours: float, db_path: Path = DB_PATH) -> bool:
+def check_reappeared(
+    listing_id: str,
+    gap_hours: float,
+    max_age_days: Optional[float] = None,
+    db_path=None,
+) -> bool:
     """
-    Return True if this listing was last seen more than `gap_hours` ago.
+    Return True if this listing dropped off the radar for more than
+    `gap_hours` and is worth ONE second look.
+
     Since each scan only pulls the newest-30 results per query, a listing
     that drops out of view has been sold/removed/pushed off the list - if
-    it later resurfaces, that's a relist/bump, not the same scan re-finding
-    it, and is worth treating as a fresh opportunity again.
+    it later resurfaces, that's a relist/bump rather than the same scan
+    re-finding it.
+
+    Two bounds added 2026-10-03, both from Milad ("if it's 1 day or 2 days
+    after its first appearance I want to see it, but make sure that doesn't
+    happen more than 1 time"):
+
+    - `max_age_days` caps how long after FIRST sighting this can fire. With
+      no upper bound, a phone first seen in July could still re-ping in
+      October; a relist only means something while the listing is fresh
+      enough that a sale plausibly just fell through.
+    - `reappear_alerted_utc` makes it once-ever. Nothing previously stopped
+      a listing from bouncing in and out of the newest-30 window week after
+      week and re-alerting every time.
     """
+    db_path = db_path or DB_PATH
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "SELECT last_seen_utc FROM seen_listings WHERE listing_id = ?", (listing_id,)
+            """
+            SELECT last_seen_utc, first_seen_utc, reappear_alerted_utc
+            FROM seen_listings WHERE listing_id = ?
+            """,
+            (listing_id,),
         ).fetchone()
     if row is None or row[0] is None:
         return False
-    gap = datetime.now(timezone.utc) - datetime.fromisoformat(row[0])
-    return gap.total_seconds() > gap_hours * 3600
+    last_seen, first_seen, already_alerted = row
+    if already_alerted:
+        return False
+
+    now = datetime.now(timezone.utc)
+    if (now - datetime.fromisoformat(last_seen)).total_seconds() <= gap_hours * 3600:
+        return False
+    if max_age_days is not None and first_seen:
+        age_days = (now - datetime.fromisoformat(first_seen)).total_seconds() / 86400
+        if age_days > max_age_days:
+            return False
+    return True
+
+
+def mark_reappear_alerted(listing_id: str, db_path=None) -> None:
+    """Record that this listing has had its one re-alert, so it can never
+    produce another however often it bounces back into the search window."""
+    db_path = db_path or DB_PATH
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE seen_listings SET reappear_alerted_utc = ? WHERE listing_id = ?",
+            (datetime.now(timezone.utc).isoformat(), listing_id),
+        )
+        conn.commit()
 
 
 def count_seen(db_path: Path = DB_PATH) -> int:

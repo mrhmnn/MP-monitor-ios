@@ -526,7 +526,26 @@ request_delay_seconds: 2
 # If it later resurfaces after sitting untouched for at least this many
 # hours, it's treated as a relist/bump and re-notified (only if it matched
 # our filters the first time around) rather than silently skipped forever.
+#
+# NARROWED 2026-10-03, Milad: "I don't like reappeared after being online
+# messages... if it's 1 day or 2 days after its first appearance I want to
+# see it, but make sure that doesn't happen more than 1 time; also stop
+# giving me all the alerts at once, I kept getting 20 alerts of reappeared
+# models in a minute span." Set realert_on_reappear false to kill the whole
+# path in one line.
+realert_on_reappear: true
 reappear_gap_hours: 24
+# Only re-alert while the listing is still FRESH - measured from when we
+# first saw it, not from when it came back. Without this there was no upper
+# bound at all: a phone first seen in July could still re-ping in October,
+# long after a relist stopped meaning "the sale just fell through". 3 days
+# covers his "1 day or 2 days after its first appearance".
+reappear_max_age_days: 3
+# Hard cap per scan. The direct answer to the 20-in-a-minute burst: whatever
+# puts a batch of old listings back in the window at once (a seller bumping
+# their whole inventory is the best fit), it can never again produce more
+# than this many messages in one run. Same guard the bargain sweep has.
+reappear_max_alerts_per_run: 2
 
 # --- Health monitoring ---
 # If total_fetched across ALL queries in a single run falls below this,
