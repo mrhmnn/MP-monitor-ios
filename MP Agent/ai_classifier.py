@@ -76,7 +76,7 @@ repair attempt, in which case it's not.
 
 DECISION RULE - apply it mechanically:
 - If ANY described defect falls in the categories above -> relevant: true.
-- All models 14 through 17 are equally wanted targets. Do NOT reason
+- All models 14 through 18 are equally wanted targets. Do NOT reason
   about model year, resale value, cost-benefit, or whether a repair
   "justifies the cost" - profitability is calculated elsewhere, it is
   NOT your job. Your only job is matching the defect to a category.
@@ -263,7 +263,7 @@ def _parse_first_json_object(raw: str) -> dict:
 HIGH_VALUE_SUFFIX = """
 
 OVERRIDE FOR THIS LISTING - it is one of the user's HIGHEST-VALUE models
-(iPhone 16 Pro Max / 17 Pro / 17 Pro Max, resale €650-1050). The resale
+(the Pro tier, 15 Pro and up - resale €450-1700). The resale
 margin here is wide enough to absorb a repair that would not be worth it on
 a cheaper phone, and the user can also simply resell the phone AS-IS with
 the defect disclosed. On this listing only:

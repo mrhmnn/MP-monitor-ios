@@ -145,6 +145,60 @@ class TestVerifiedSellersStopAtTheFilter:
         assert result.accepted
 
 
+class TestPromptMatchesConfig:
+    """The prompt describes its own scope in prose, and config.yaml decides
+    it. They drifted (found 2026-10-03): the iPhone 18 became a target on
+    09-17, but the prompt's mechanical DECISION RULE still read "all models
+    14 through 17", contradicting the four other places that said 14-18 -
+    on the newest and most expensive generation in scope. The high-value
+    override had drifted the same way since 07-28, naming three models by
+    hand while config.yaml had grown to seven.
+
+    These fail the next time a generation is added, instead of letting the
+    contradiction sit in production for weeks.
+    """
+
+    def test_the_decision_rule_covers_every_target_generation(self):
+        import ai_classifier
+
+        generations = sorted(filters.enabled_generations(_config()["target_models"]))
+        # The 14 is switched off in target_models but deliberately still
+        # described as in-scope by the prompt, so compare on the TOP end:
+        # that is the one that moves when a new iPhone ships.
+        assert f"through {generations[-1]}" in ai_classifier.SYSTEM_PROMPT
+
+    def test_every_scope_declaration_names_the_newest_generation(self):
+        """Scoped to phrases that declare the whole SCOPE ("models 14-18",
+        "models 14 through 18"). Deliberately not any "14-N" string: the
+        prompt also carries real sub-ranges, like the "(14-16 gen)" battery
+        and charging-port carve-out, which must not be rewritten when a new
+        generation ships."""
+        import re
+
+        import ai_classifier
+
+        newest = sorted(filters.enabled_generations(_config()["target_models"]))[-1]
+        full = ai_classifier.SYSTEM_PROMPT + ai_classifier.HIGH_VALUE_SUFFIX
+        declarations = re.findall(r"models 1[45] ?(?:through |-)(1[0-9])", full)
+        assert declarations, "no scope declaration found in the prompt at all"
+        assert set(declarations) == {newest}, (
+            f"prompt declares scope up to {sorted(set(declarations))}, "
+            f"config.yaml targets up to {newest}"
+        )
+
+    def test_the_high_value_override_names_no_model_list_of_its_own(self):
+        """It used to hardcode "16 Pro Max / 17 Pro / 17 Pro Max". Any
+        hand-maintained list here goes stale the moment config.yaml grows,
+        and then tells Haiku its own listing is not high-value."""
+        import ai_classifier
+
+        models = _config()["high_value_models"]
+        named = [m for m in models if m.replace("iphone ", "") in
+                 ai_classifier.HIGH_VALUE_SUFFIX.lower()]
+        # Describing the TIER is fine; enumerating specific models is not.
+        assert len(named) <= 1, f"override enumerates models: {named}"
+
+
 def _config() -> dict:
     import yaml
     from pathlib import Path
