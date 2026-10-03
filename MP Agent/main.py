@@ -353,11 +353,22 @@ def run_scan_cycle(config: dict) -> None:
                     # the listing tells the reader to go look at the pictures
                     # instead (2026-08-20).
                     points_at_photos = _POINTS_AT_PHOTOS_RE.search(ai_input) is not None
+                    # The GALLERY, not the search-result thumbnail (2026-10-03
+                    # audit). The LRP search API returns exactly ONE picture
+                    # per item - measured live, 30 of 30 - so ai_max_images: 3
+                    # had always been effectively 1, and on a "zie foto's"
+                    # listing the classifier was judging the damage from the
+                    # thumbnail alone. The VIP page carries every photo and is
+                    # already fetched a few lines up for the AI input, so this
+                    # costs no extra request. recheck_rejects.py has used the
+                    # gallery since 08-19; the live scan was the weaker path.
+                    # Falls back to the thumbnail when the detail fetch failed.
+                    photos = (details.image_urls or listing.image_urls) if details else listing.image_urls
                     verdict = ai_classifier.classify_ambiguous_listing(
                         ai_input,
                         config["ai_model"],
                         high_value=high_value,
-                        image_urls=listing.image_urls if points_at_photos else None,
+                        image_urls=photos if points_at_photos else None,
                         max_images=config.get("ai_max_images", 3),
                     )
                     # NO-DEFECT GATE (2026-08-20 #2, Milad: "used products
@@ -403,7 +414,13 @@ def run_scan_cycle(config: dict) -> None:
                         "AI context for '%s': %s%s - %s",
                         listing.title,
                         "RELEVANT" if verdict.relevant else "no clear target defect",
-                        " [photos read]" if points_at_photos else "",
+                        # The COUNT, not just the fact (2026-10-03): "photos
+                        # read" looked healthy for six weeks while only ever
+                        # one photo was attached. A number makes the next
+                        # regression of this kind visible in one grep.
+                        " [%d photos read]" % min(
+                            len(photos), config.get("ai_max_images", 3)
+                        ) if points_at_photos else "",
                         verdict.reason,
                     )
                 elif not accepted and not reason.startswith("not a target model"):
