@@ -562,6 +562,21 @@ alert_cadence_consecutive_runs: 3
 # limited to once every this many hours rather than ~24 times a day.
 alert_cadence_cooldown_hours: 12
 
+# --- AI classifier outage watchdog (2026-10-03) ---
+# The two checks above only see runs that happened and what they fetched.
+# Neither can see the classifier being unreachable: on 2026-09-20..09-24 the
+# Haiku API failed on every call for five straight days while scraping stayed
+# healthy, so alerts dropped from ~30/day to 5-11/day (keyword matches only)
+# and nothing flagged it. seen_listings holds zero "AI review" rows for that
+# window and 229 on 09-25 when the backlog flushed.
+# A warning fires after this many CONSECUTIVE runs in which every attempted
+# AI call failed. Runs that attempted no AI calls are ignored, not counted as
+# healthy - most runs find no new listings at all.
+alert_ai_failure_consecutive_runs: 3
+# Same rate limit as the cadence watchdog: during an outage every run trips
+# the check, so without a cooldown the warning fires ~200 times a day.
+alert_ai_cooldown_hours: 12
+
 # --- High-value models (2026-07-28) ---
 # On these, the AI stops rejecting defects for being expensive to repair.
 # Rationale (measured 07-27): 17 Pro, 17 Pro Max and 16 Pro Max produced

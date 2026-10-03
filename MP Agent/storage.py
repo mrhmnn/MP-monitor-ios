@@ -231,10 +231,17 @@ def set_outcome(
         conn.commit()
 
 
-def bump_health_counter(key: str, failed: bool, db_path: Path = DB_PATH) -> int:
+def bump_health_counter(key: str, failed: bool, db_path=None) -> int:
     """
     Increment a consecutive-failure counter when `failed`, reset it to 0 when
     not, and return the resulting value.
+
+    db_path resolves at CALL time for the same reason get_health_value does
+    (see its docstring): a `db_path: Path = DB_PATH` default binds at import,
+    so monkeypatching storage.DB_PATH left this function writing to the real
+    database while the test read the temp one. main.py calls it without a
+    path, so it has to be patchable - found 2026-10-03 writing the AI-outage
+    watchdog's tests.
 
     Exists so a single blocked run doesn't fire an alarm. Marktplaats 403s the
     GitHub Actions IP for a few minutes at a time and then lets it back in
@@ -242,6 +249,7 @@ def bump_health_counter(key: str, failed: bool, db_path: Path = DB_PATH) -> int:
     them fetched 793 each). A one-run outage is self-healing and needs no
     action, so alerting on it just trains the alert to be ignored.
     """
+    db_path = db_path or DB_PATH
     with sqlite3.connect(db_path) as conn:
         if not failed:
             conn.execute(

@@ -212,6 +212,73 @@ def check_run_cadence(config: dict) -> None:
     )
 
 
+def check_ai_health(ai_calls: int, ai_failures: int, config: dict) -> None:
+    """
+    Warn when the Haiku classifier is unreachable run after run.
+
+    Added 2026-10-03 after the audit found a FIVE-DAY outage nobody saw:
+    seen_listings holds zero "AI review" rows for 09-20..09-24, against
+    68-99 a day either side, and 229 on 09-25 when the backlog finally
+    flushed. Alerts fell from ~30/day to 5-11/day for five days while the
+    scrape itself stayed perfectly healthy (197-323 new listings a day).
+
+    Neither existing check could see it. The 07-28 health check inspects
+    what a run FETCHED, and fetching was fine. The 08-09 cadence watchdog
+    inspects the gap between runs, and the runs were all happening on time.
+    Every ambiguous listing was simply being deferred by the transient-error
+    path in run_scan_cycle - correctly, since that is what let 09-25 recover
+    the backlog instead of burying it - but silently, ~200 times a day.
+
+    A run that attempted no AI calls says nothing either way, so it leaves
+    the counter alone rather than resetting it: at this cadence most runs
+    find no new listings at all, and treating those as healthy would wipe
+    the streak before it ever reached the threshold.
+    """
+    if ai_calls == 0:
+        return
+
+    all_failed = ai_failures == ai_calls
+    streak = storage.bump_health_counter("ai_failure_runs", all_failed)
+    if not all_failed:
+        return
+
+    required = config.get("alert_ai_failure_consecutive_runs", 3)
+    if streak < required:
+        logger.warning(
+            "AI classifier unreachable: %d of %d calls failed - run %d of %d "
+            "before alerting; likely a transient API blip, no alert sent",
+            ai_failures, ai_calls, streak, required,
+        )
+        return
+
+    # Cooldown for the same reason the cadence watchdog has one: during a real
+    # outage this condition is true on EVERY run, so an uncooled warning would
+    # fire ~200 times a day and be muted within the hour - which is exactly
+    # how the next outage goes unnoticed.
+    cooldown_hours = config.get("alert_ai_cooldown_hours", 12)
+    now = int(time.time())
+    last_alert = storage.get_health_value("ai_alert_epoch") or 0
+    if now - last_alert < cooldown_hours * 3600:
+        return
+
+    sent = telegram_notifier.send_message(
+        "⚠️ <b>AI classifier down</b>\n"
+        f"The last {streak} runs could not reach the Haiku API - every "
+        "ambiguous listing is being deferred instead of judged.\n\n"
+        "Scanning and keyword-match alerts still work, so alerts keep "
+        "arriving, just far fewer: this is the half of recall that reads "
+        "Dutch descriptions. Usual cause: the <b>ANTHROPIC_API_KEY</b> "
+        "expired or the account is out of credit.\n"
+        "Nothing is lost meanwhile - deferred listings are left unseen and "
+        "get judged on the first run that works again."
+    )
+    storage.set_health_value("ai_alert_epoch", now)
+    logger.warning(
+        "AI outage warning (%d/%d calls failed, streak %d) - alert %s",
+        ai_failures, ai_calls, streak, "sent" if sent else "FAILED TO SEND",
+    )
+
+
 def run_scan_cycle(config: dict) -> None:
     storage.init_db()
     check_run_cadence(config)
@@ -220,6 +287,7 @@ def run_scan_cycle(config: dict) -> None:
     total_new = 0
     failed_queries = 0
     ai_calls = 0
+    ai_failures = 0
     skipped_too_far = 0
     sent_matches = 0
     failed_sends = 0
@@ -325,6 +393,7 @@ def run_scan_cycle(config: dict) -> None:
                         # Found in the 07-18 probe review: three listings were
                         # permanently buried as rejects this way, one of them
                         # a textbook target (cracks front + back).
+                        ai_failures += 1
                         logger.warning(
                             "AI call failed for '%s' - leaving unseen to retry "
                             "next run", listing.title,
@@ -514,13 +583,15 @@ def run_scan_cycle(config: dict) -> None:
 
     logger.info(
         "Scan complete. Fetched: %d | New: %d | Matched: %d | Bargains: %d | "
-        "Too far: %d | AI calls: %d | Failed sends: %d | Total tracked: %d",
+        "Too far: %d | AI calls: %d (%d failed) | Failed sends: %d | "
+        "Total tracked: %d",
         total_fetched,
         total_new,
         sent_matches,
         bargains_sent,
         skipped_too_far,
         ai_calls,
+        ai_failures,
         failed_sends,
         storage.count_seen(),
     )
@@ -531,6 +602,8 @@ def run_scan_cycle(config: dict) -> None:
     # 22 queries returning next to nothing is not a normal day. This is the
     # exact failure mode that went unnoticed for hours the first time
     # around, so it gets flagged loudly instead of failing silently.
+    check_ai_health(ai_calls, ai_failures, config)
+
     total_queries = len(config["search_queries"])
     min_expected = config.get("alert_min_total_fetched", 30)
     # PARTIAL breakage is the realistic failure mode, and the absolute
