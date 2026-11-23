@@ -1,0 +1,94 @@
+name: Prime Seen Listings (quiet restart)
+
+# Manual only, on purpose. This workflow writes PERMANENT silence into the
+# seen-listings database: every listing it touches can never produce an
+# alert again. Nothing should be able to trigger that on a schedule.
+#
+# What it is for: restarting after an outage without the backlog firing.
+# When the AI classifier is down, main.py leaves AI-review listings unseen
+# so they retry next run - correct for a blip, but across a long outage it
+# builds a pool of unseen-but-still-live listings that all get classified,
+# and alerted, in the first healthy run. This absorbs that pool first.
+#
+# Order of operations for a clean restart:
+#   1. Run this workflow (dry_run first if you want the numbers).
+#   2. Top up the Anthropic credit balance.
+#   3. Restore the cron-job.org dispatcher cadence.
+# Priming AFTER the credits are back defeats the point - the first healthy
+# scan will already have sent the burst.
+on:
+  workflow_dispatch:
+    inputs:
+      older_than_hours:
+        description: "Only bury listings older than this many hours (0 = everything currently visible)"
+        required: false
+        default: "24"
+      dry_run:
+        description: "Count only, write nothing"
+        type: boolean
+        required: false
+        default: false
+
+# Shares the scan's concurrency group: a prime and a scan running together
+# would both restore the same snapshot and force-push the data branch, and
+# the loser's writes would vanish - which here means listings silently
+# staying alertable after a run that reported burying them.
+concurrency:
+  group: marktplaats-scan
+  cancel-in-progress: false
+
+jobs:
+  prime:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    defaults:
+      run:
+        working-directory: "MP Agent"
+
+    steps:
+      - name: Check out repository (main branch, for code)
+        uses: actions/checkout@v4
+
+      - name: Restore database from data branch
+        working-directory: ${{ github.workspace }}
+        run: |
+          if git ls-remote --exit-code --heads origin data; then
+            git fetch origin data
+            git checkout origin/data -- "MP Agent/seen_listings.db" 2>/dev/null || echo "No existing database on data branch, starting fresh"
+          else
+            echo "data branch does not exist yet - nothing to prime against"
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: "MP Agent/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # No ANTHROPIC_API_KEY and no TELEGRAM_* secrets are passed in. The
+      # script does not use them, and withholding them makes a classifier
+      # call or a notification impossible rather than merely unintended.
+      - name: Prime the backlog
+        run: |
+          python prime_seen.py \
+            --older-than-hours "${{ inputs.older_than_hours }}" \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Save updated database to data branch
+        if: ${{ !inputs.dry_run }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan data-tmp
+          git rm -rf --cached . > /dev/null
+          git add -f "MP Agent/seen_listings.db"
+          git commit -m "Prime seen listings (quiet restart)" || echo "No changes to commit"
+          git push origin data-tmp:data --force
+          echo "Database snapshot pushed to data branch"

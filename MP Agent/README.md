@@ -106,6 +106,34 @@ All scanned listings plus 4 broad resale-sweep queries feed
 a weekly workflow posts it to Telegram (Sat 16:00 NL) and the weekly
 review updates the vault note.
 
+## Quiet restart after an outage (prime_seen.py)
+
+When the AI classifier is down, main.py leaves AI-review listings
+**unseen** so they retry next run. Right for a blip, costly across a long
+outage: the unseen-but-still-live pool (~300 listings on 2026-11-23, with
+the Anthropic credit balance empty) all gets classified in the first
+healthy run and alerts at once, for listings that are by then days old.
+
+`prime_seen.py` absorbs that pool first - it writes a seen row with
+`matched = 0`, `outcome = 'primed'` for every currently visible listing
+that has none, makes no AI call, and cannot notify (it does not import
+the notifier). `matched = 0` also blocks the reappear re-alert path, and
+the koopje dedup is marked in `market_listings` too, so neither channel
+leaks. Price ingest still runs, so the price history keeps no hole.
+
+```bash
+python prime_seen.py --dry-run               # count, change nothing
+python prime_seen.py --older-than-hours 24   # bury the stale pile only
+python prime_seen.py                         # bury everything visible
+```
+
+A primed listing is silenced **permanently**, so `--older-than-hours`
+is the safer posture: it keeps today's listings alertable, and a listing
+whose post date won't parse is treated as fresh rather than buried on a
+guess. Run it via the `Prime Seen Listings` workflow (manual dispatch,
+no secrets passed in) **before** restoring credits or the dispatcher
+cadence - afterwards, the burst has already been sent.
+
 ## What's NOT built yet (by design)
 
 - **Profit/repair-cost estimates**: removed. Swappie payout line went
