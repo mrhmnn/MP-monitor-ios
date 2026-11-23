@@ -33,6 +33,12 @@ import storage
 from scraper import Listing
 
 
+_NL_MONTH_NAMES = {
+    1: "jan", 2: "feb", 3: "mrt", 4: "apr", 5: "mei", 6: "jun",
+    7: "jul", 8: "aug", 9: "sep", 10: "okt", 11: "nov", 12: "dec",
+}
+
+
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     path = tmp_path / "test.db"
@@ -52,11 +58,21 @@ def config():
 
 
 def _listing(listing_id, hours_ago=None, posted_date=None):
-    """A search-result listing. `hours_ago` sets a parseable post date."""
+    """A search-result listing.
+
+    `hours_ago` is expressed in the shape the live LRP API actually
+    returns - "Vandaag"/"Gisteren"/"8 jun '26", NOT a timestamp (measured
+    2026-11-23; assuming ISO here is what made the first prime run bury
+    0 of 297 listings).
+    """
     if hours_ago is not None:
-        posted_date = (
-            datetime.now(timezone.utc) - timedelta(hours=hours_ago)
-        ).isoformat().replace("+00:00", "Z")
+        if hours_ago < 24:
+            posted_date = "Vandaag"
+        elif hours_ago < 48:
+            posted_date = "Gisteren"
+        else:
+            day = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+            posted_date = f"{day.day} {_NL_MONTH_NAMES[day.month]} '{day:%y}"
     return Listing(
         listing_id=listing_id,
         title=f"iPhone 15 Pro {listing_id}",
@@ -149,7 +165,7 @@ class TestAgeCutoff:
     def test_an_unreadable_date_counts_as_fresh(self, db, config, fetch):
         """Priming is irreversible, so an unparseable date must not be
         buried on a guess - it stays alertable."""
-        fetch["listings"] = [_listing("m1", posted_date="gisteren")]
+        fetch["listings"] = [_listing("m1", posted_date="ooit")]
 
         stats = prime_seen.prime(config, older_than_hours=24, db_path=db)
 
@@ -166,20 +182,63 @@ class TestAgeCutoff:
         assert _row(db, "m1") is not None
 
     @pytest.mark.parametrize(
-        "raw,expected_tz",
+        "raw,expected_hours",
         [
-            ("2026-11-23T08:12:03Z", timezone.utc),
-            ("2026-11-23T08:12:03+00:00", timezone.utc),
-            ("2026-11-23T08:12:03", timezone.utc),  # naive -> assumed UTC
+            # What the live feed actually returns, measured 2026-11-23.
+            ("Vandaag", 0.0),
+            ("vandaag", 0.0),
+            ("Gisteren", 24.0),
+            ("Eergisteren", 48.0),
+            # Explicit Dutch dates, including the "mrt"/"mei"/"okt"
+            # abbreviations that differ from English.
+            ("23 nov '26", 0.0),
+            ("21 nov '26", 48.0),
+            ("8 jun '26", 4032.0),  # 168 days
+            # ISO is still accepted in case the API changes shape.
+            ("2026-11-22T22:00:00Z", 24.0),
         ],
     )
-    def test_post_date_shapes_that_must_parse(self, raw, expected_tz):
-        parsed = prime_seen.parse_posted(raw)
-        assert parsed is not None and parsed.tzinfo == expected_tz
+    def test_the_date_shapes_the_feed_really_uses(self, raw, expected_hours, monkeypatch):
+        now = datetime(2026, 11, 23, 22, 0, tzinfo=timezone.utc)
+        assert prime_seen.estimate_age_hours(raw, now=now) == pytest.approx(
+            expected_hours, abs=1.0
+        )
 
     def test_junk_dates_return_none(self):
-        for raw in ("", "   ", "gisteren", "8 jun '26"):
-            assert prime_seen.parse_posted(raw) is None
+        for raw in ("", "   ", "ooit", "vorige maand", "32 xyz '26"):
+            assert prime_seen.estimate_age_hours(raw) is None
+
+    def test_a_bumped_listing_reads_as_fresh_not_stale(self):
+        """The feed's date can be a paid bump rather than the original
+        posting. Reading a bump as fresh leaves the listing alertable,
+        which is the harmless direction - the reverse would bury a phone
+        that is genuinely for sale today."""
+        assert prime_seen.estimate_age_hours("Vandaag") == 0.0
+
+
+class TestAgeBreakdown:
+    def test_the_unseen_pool_is_bucketed_by_age(self, db, config, fetch):
+        """The first real run buried 0 of 297 because the pool was assumed
+        stale and was not. The breakdown is reported every run so the
+        cutoff is chosen against numbers."""
+        fetch["listings"] = [
+            _listing("a", hours_ago=1),
+            _listing("b", hours_ago=2),
+            _listing("c", hours_ago=30),
+            _listing("d", hours_ago=100),
+            _listing("e", posted_date="ooit"),
+        ]
+
+        stats = prime_seen.prime(config, older_than_hours=24, dry_run=True, db_path=db)
+
+        assert stats["unseen_today"] == 2
+        assert stats["unseen_1d"] == 1
+        assert stats["unseen_2d_plus"] == 1
+        assert stats["unseen_unknown"] == 1
+        # Yesterday-and-older qualifies at a 24h cutoff; today and the
+        # unreadable one do not.
+        assert stats["primed"] == 2
+        assert stats["left_fresh"] == 3
 
 
 class TestItCannotNotify:

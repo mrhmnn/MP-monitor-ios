@@ -61,8 +61,9 @@ branch is the one that gets updated.
 
 import argparse
 import logging
+import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import yaml
 
@@ -73,37 +74,85 @@ import storage
 logger = logging.getLogger("prime_seen")
 
 
-def parse_posted(posted_date: str):
-    """Best-effort parse of the LRP API's `date` field to an aware datetime.
+# Dutch month abbreviations as the search feed writes them ("8 jun '26").
+_NL_MONTHS = {
+    "jan": 1, "feb": 2, "mrt": 3, "apr": 4, "mei": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "okt": 10, "nov": 11, "dec": 12,
+}
+_NL_DATE_RE = re.compile(r"^(\d{1,2})\s+([a-z]{3})\.?\s*'?(\d{2,4})?$")
+# "Vandaag" / "Gisteren" / "Eergisteren" in whole days.
+_NL_RELATIVE = {"vandaag": 0, "gisteren": 1, "eergisteren": 2}
 
-    Returns None when it cannot be read, which callers must treat as
-    "assume fresh" - see the module docstring.
+
+def estimate_age_hours(posted_date: str, now=None):
+    """Age of a listing in hours from the search feed's date field, or None.
+
+    MEASURED 2026-11-23, against the live LRP API: this field is NOT a
+    timestamp. It is the string Marktplaats shows in the results list -
+    "Vandaag", "Gisteren", or "8 jun '26". The first version of this
+    script assumed ISO 8601, so every value parsed as None, every listing
+    counted as fresh, and `--older-than-hours 24` primed exactly 0 of 297
+    listings. (It failed safe rather than burying the wrong thing, which
+    is why the unparseable branch below stays as it is.)
+
+    Day resolution is all this field offers, so ages come back as whole
+    days: Vandaag = 0h, Gisteren = 24h, an explicit date = that many days
+    ago. A cutoff of 24h therefore means "yesterday and older". ISO is
+    still handled in case the API changes or the HTML fallback supplies a
+    real timestamp.
+
+    Note this date can be a paid BUMP rather than the original posting
+    (scraper.fetch_listing_details' posted_iso is the true one, but it
+    costs a listing-page fetch each - and those are currently 403ing from
+    the runner). A bumped listing therefore reads as fresh and is left
+    alertable, which is the harmless direction.
     """
     if not posted_date:
         return None
-    text = posted_date.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
+    now = now or datetime.now(timezone.utc)
+    text = posted_date.strip().lower()
+
+    if text in _NL_RELATIVE:
+        return _NL_RELATIVE[text] * 24.0
+
+    match = _NL_DATE_RE.match(text)
+    if match:
+        day, month_name, year = match.groups()
+        month = _NL_MONTHS.get(month_name)
+        if month:
+            year_num = now.year if year is None else int(year)
+            if year_num < 100:
+                year_num += 2000
+            try:
+                posted = datetime(year_num, month, int(day), tzinfo=timezone.utc)
+            except ValueError:
+                return None
+            # Whole days, so a listing from today via this shape reads 0h.
+            return max((now.date() - posted.date()).days, 0) * 24.0
+
+    iso = posted_date.strip()
+    if iso.endswith("Z"):
+        iso = iso[:-1] + "+00:00"
     try:
-        parsed = datetime.fromisoformat(text)
+        parsed = datetime.fromisoformat(iso)
     except ValueError:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
+    return max((now - parsed).total_seconds() / 3600.0, 0.0)
 
 
-def is_stale_enough(listing, cutoff) -> bool:
+def is_stale_enough(listing, cutoff_hours: float, now=None) -> bool:
     """True when this listing may be primed.
 
-    `cutoff` is None for "no age filter - prime everything visible".
+    `cutoff_hours <= 0` means "no age filter - prime everything visible".
     """
-    if cutoff is None:
+    if cutoff_hours <= 0:
         return True
-    posted = parse_posted(getattr(listing, "posted_date", ""))
-    if posted is None:
-        return False  # unparseable date -> leave it alertable
-    return posted < cutoff
+    age = estimate_age_hours(getattr(listing, "posted_date", ""), now=now)
+    if age is None:
+        return False  # unreadable date -> leave it alertable
+    return age >= cutoff_hours
 
 
 def prime(
@@ -128,10 +177,7 @@ def prime(
     db_path = db_path or storage.DB_PATH
     storage.init_db(db_path)
 
-    cutoff = None
-    if older_than_hours > 0:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
-
+    now = datetime.now(timezone.utc)
     stats = {
         "queries": 0,
         "failed_queries": 0,
@@ -139,9 +185,17 @@ def prime(
         "already_seen": 0,
         "primed": 0,
         "left_fresh": 0,
+        # Age breakdown of the UNSEEN pool only - the listings a restart
+        # would actually classify. Printed on every run (dry or not) so the
+        # choice of cutoff can be made against real numbers instead of an
+        # assumption about how stale the backlog is.
+        "unseen_today": 0,
+        "unseen_1d": 0,
+        "unseen_2d_plus": 0,
+        "unseen_unknown": 0,
     }
     reason = (
-        f"primed {datetime.now(timezone.utc).date().isoformat()}: quiet restart, "
+        f"primed {now.date().isoformat()}: quiet restart, "
         "backlog suppressed without classification"
     )
 
@@ -174,7 +228,17 @@ def prime(
             if storage.get_seen_record(listing.listing_id, db_path=db_path) is not None:
                 stats["already_seen"] += 1
                 continue
-            if not is_stale_enough(listing, cutoff):
+            age = estimate_age_hours(getattr(listing, "posted_date", ""), now=now)
+            if age is None:
+                stats["unseen_unknown"] += 1
+            elif age < 24:
+                stats["unseen_today"] += 1
+            elif age < 48:
+                stats["unseen_1d"] += 1
+            else:
+                stats["unseen_2d_plus"] += 1
+
+            if not is_stale_enough(listing, older_than_hours, now=now):
                 stats["left_fresh"] += 1
                 continue
             stats["primed"] += 1
@@ -251,6 +315,11 @@ def main(argv=None) -> int:
         stats["queries"],
         stats["failed_queries"],
         storage.count_seen(),
+    )
+    logger.info(
+        "Unseen pool by age: today %d | yesterday %d | 2+ days %d | unreadable %d",
+        stats["unseen_today"], stats["unseen_1d"],
+        stats["unseen_2d_plus"], stats["unseen_unknown"],
     )
     if stats["failed_queries"]:
         logger.warning(

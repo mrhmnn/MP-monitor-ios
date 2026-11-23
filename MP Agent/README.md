@@ -130,7 +130,15 @@ python prime_seen.py                         # bury everything visible
 A primed listing is silenced **permanently**, so `--older-than-hours`
 is the safer posture: it keeps today's listings alertable, and a listing
 whose post date won't parse is treated as fresh rather than buried on a
-guess. Run it via the `Prime Seen Listings` workflow (manual dispatch,
+guess.
+
+Age comes from the search feed's date field, which is **not** a
+timestamp - it is `Vandaag` / `Gisteren` / `8 jun '26` (measured
+2026-11-23). So age has day resolution, `--older-than-hours 24` means
+"yesterday and older", and because that date can be a paid bump rather
+than the original posting, a bumped listing reads as fresh. Every run
+also logs the unseen pool broken down by age, which is the number to
+look at before choosing a cutoff. Run it via the `Prime Seen Listings` workflow (manual dispatch,
 no secrets passed in) **before** restoring credits or the dispatcher
 cadence - afterwards, the burst has already been sent.
 
