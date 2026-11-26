@@ -286,6 +286,40 @@ def is_business_listing(text: str, indicators: list[str], threshold: int) -> boo
     return _count_matches(text, indicators) >= threshold
 
 
+def is_shop_boilerplate(text: str, indicators: list[str]) -> Optional[str]:
+    """A single shop-identity phrase is enough to reject.
+
+    Separate from is_business_listing's threshold of 2 because these
+    phrases are not stock description, they are a shop introducing itself
+    ("de specialist in reparatie, verkoop & inkoop van telefoons, tablets
+    en laptops"). A private seller writes none of them, so requiring a
+    second hit only gives the shop a way through - which is exactly what
+    happened on 2026-11-26.
+    """
+    return _contains_any(text, indicators)
+
+
+def is_marketing_question(title: str, text: str, primary_term: str) -> bool:
+    """True when the damage keyword is a shop's sales pitch, not a defect.
+
+    "Scherm kapot? Laadt je iphone niet meer goed op? Geen zorgen - wij
+    repareren het" contains 'scherm kapot' and auto-accepted as a primary
+    match. The question mark is the whole signal: a seller stating damage
+    writes "scherm kapot", a shop offering to fix it asks "scherm kapot?".
+
+    Guarded two ways so a real listing cannot be lost to this:
+      - the term must be absent from the TITLE. A title saying "scherm
+        kapot" is the seller describing their own phone, whatever the
+        description does.
+      - the verdict is needs_ai_review, never a rejection. The classifier
+        still reads the listing and decides; this only takes away the
+        free auto-accept that let the boilerplate through unexamined.
+    """
+    if primary_term in title:
+        return False
+    return re.search(re.escape(primary_term) + r"\s*\?", text) is not None
+
+
 def is_buyer_ad(text: str, indicators: list[str]) -> bool:
     return _contains_any(text, indicators) is not None
 
@@ -441,6 +475,15 @@ def evaluate_listing(
             reason="accessory listing (case/protector/cable), not a phone",
         )
 
+    shop_phrase = is_shop_boilerplate(
+        combined_text, config.get("shop_boilerplate_indicators", [])
+    )
+    if shop_phrase:
+        return FilterResult(
+            accepted=False,
+            reason=f"shop boilerplate matched: '{shop_phrase}' - a repair shop's own ad copy",
+        )
+
     if is_business_listing(
         combined_text,
         config["business_seller_indicators"],
@@ -478,6 +521,15 @@ def evaluate_listing(
             return FilterResult(
                 accepted=False,
                 reason=f"vague title ('{vague_signal}') - needs AI confirmation despite keyword match",
+                needs_ai_review=True,
+            )
+        if is_marketing_question(title_lower, combined_text, primary_term):
+            return FilterResult(
+                accepted=False,
+                reason=(
+                    f"'{primary_term}?' reads as a repair offer, not a defect "
+                    "(keyword only in the description, as a question) - AI decides"
+                ),
                 needs_ai_review=True,
             )
         return FilterResult(accepted=True, reason=f"primary keyword matched: '{primary_term}'")

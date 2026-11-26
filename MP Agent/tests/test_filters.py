@@ -448,3 +448,122 @@ class TestGeneration18AndFoldables:
             "iPhone 18 Pro 256GB", "Scherm kapot. Ik heb ook nog een iPhone Duo te koop."
         )
         assert result.accepted
+
+
+# --- Repair-shop ad copy (2026-11-26) ---------------------------------------
+
+# Mobile Clinic Groningen posted ~19 ads in one evening. The first ~230
+# chars Marktplaats serves anonymously are the shop's own introduction:
+#
+#   "mobile clinic groningen al ruim 20 jaar de specialist in reparatie,
+#    verkoop & inkoop van telefoons, tablets en laptops! Scherm kapot?
+#    Laadt je iphone niet meer goed op? Geen zorgen - "
+#
+# Seven of them (the 15/16-series ones) alerted on Milad's phone. Every
+# structured business signal read "private seller": no website flag, no
+# verified badge, priority_product NONE. None of the seven
+# business_seller_indicators appears in the snippet either, and the gate
+# needs two of them. So the listing reached the primary-keyword gate,
+# matched 'scherm kapot' out of the shop's sales pitch, and auto-accepted
+# with no AI call to catch it.
+
+SHOP_COPY = (
+    "## mobile clinic groningen al ruim 20 jaar de specialist in reparatie, "
+    "verkoop & inkoop van telefoons, tablets en laptops! ### Scherm kapot? "
+    "Laadt je iphone niet meer goed op? Geen zorgen - "
+)
+
+
+class TestRepairShopAdCopy:
+    def test_the_production_listing_no_longer_alerts(self):
+        result = evaluate("black friday actie apple iphone 16 128gb", SHOP_COPY)
+        assert not result.accepted
+        # Rejected outright, not handed to the classifier: paying for a
+        # Haiku call on a shop's boilerplate is the second-cheapest
+        # failure, not the fix.
+        assert not result.needs_ai_review
+        assert "shop boilerplate" in result.reason
+
+    @pytest.mark.parametrize(
+        "phrase",
+        [
+            "specialist in reparatie",
+            "verkoop & inkoop",
+            "inkoop van telefoons",
+            "tablets en laptops",
+            "mobile clinic",
+        ],
+    )
+    def test_one_shop_phrase_is_enough(self, phrase):
+        """Single-hit on purpose. Requiring a second phrase is what let
+        this shop through, and no private seller writes any of these."""
+        result = evaluate("iPhone 15 Pro 128GB", f"Mooie telefoon. {phrase} in Groningen.")
+        assert not result.accepted
+        assert "shop boilerplate" in result.reason
+
+    def test_a_private_seller_mentioning_a_repair_shop_still_passes(self):
+        """The phrases are shop self-description, so the ones that could
+        plausibly appear in a private ad must not be in the list. A seller
+        naming where they got a quote keeps their listing."""
+        result = evaluate(
+            "iPhone 15 Pro 128GB - scherm kapot",
+            "Scherm kapot na een val. Reparatie bij de telefoonwinkel zou 200 euro kosten.",
+        )
+        assert result.accepted
+
+
+class TestMarketingQuestion:
+    """The deeper hole: a damage keyword that is a sales pitch, not a defect.
+
+    This is what makes the fix general. Another shop with different
+    boilerplate ("Scherm kapot? Wij repareren het!") would walk straight
+    through the phrase list above, and auto-accept on exactly the same
+    free primary-keyword path.
+    """
+
+    def test_a_question_in_the_description_does_not_auto_accept(self):
+        result = evaluate(
+            "iPhone 16 Pro 128GB zwart",
+            "Scherm kapot? Wij repareren het binnen een dag, kom langs!",
+        )
+        assert not result.accepted
+        assert result.needs_ai_review
+        assert "repair offer" in result.reason
+
+    def test_the_title_always_wins(self):
+        """A seller stating damage in the TITLE is describing their own
+        phone. Whatever the description asks, that listing auto-accepts -
+        this guard is why the change cannot cost a real deal."""
+        result = evaluate(
+            "iPhone 15 Pro - scherm kapot",
+            "Scherm kapot? Ja, flinke barst. Verder prima toestel.",
+        )
+        assert result.accepted
+        assert "primary keyword matched" in result.reason
+
+    def test_a_plain_statement_in_the_description_still_auto_accepts(self):
+        """No question mark, no downgrade. The punctuation is the whole
+        signal and it must not leak into normal listings."""
+        result = evaluate("iPhone 15 128GB", "Scherm kapot, verder werkt alles.")
+        assert result.accepted
+        assert "primary keyword matched" in result.reason
+
+    def test_the_verdict_is_ai_review_never_a_rejection(self):
+        """A genuine listing phrased as a question ("Scherm kapot? Helaas
+        wel") must still be able to reach Milad. The classifier reads it;
+        this gate only removes the free pass."""
+        result = evaluate("iPhone 17 Pro 256GB", "Scherm kapot? Helaas wel, gevallen.")
+        assert result.needs_ai_review
+
+    def test_unit_level_guards(self):
+        assert filters.is_marketing_question(
+            "iphone 16 pro 128gb", "iphone 16 pro 128gb scherm kapot? wij repareren", "scherm kapot"
+        )
+        # Term present in the title -> never a marketing question.
+        assert not filters.is_marketing_question(
+            "iphone 16 scherm kapot", "iphone 16 scherm kapot? ja", "scherm kapot"
+        )
+        # No question mark -> not a marketing question.
+        assert not filters.is_marketing_question(
+            "iphone 16 pro", "iphone 16 pro scherm kapot en gevallen", "scherm kapot"
+        )

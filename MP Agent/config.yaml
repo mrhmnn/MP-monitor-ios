@@ -381,6 +381,23 @@ business_seller_indicators:
   - "gecontroleerde verkoper"
 business_indicator_threshold: 2
 
+# Shop boilerplate - ONE hit rejects (2026-11-26). Mobile Clinic Groningen
+# posted ~19 ads in a single evening whose description opens with "al ruim
+# 20 jaar de specialist in reparatie, verkoop & inkoop van telefoons,
+# tablets en laptops! Scherm kapot? Laadt je iphone niet meer goed op?"
+# Seven of them alerted: not one of the business_seller_indicators above
+# appears in the first ~230 chars Marktplaats serves anonymously, and the
+# shop sets neither the website flag nor the verified badge, so every
+# structured signal read "private seller". These phrases are shop identity,
+# not stock description - a private seller does not write them at all,
+# which is why one hit is enough instead of the threshold of 2.
+shop_boilerplate_indicators:
+  - "specialist in reparatie"
+  - "verkoop & inkoop"
+  - "inkoop van telefoons"
+  - "tablets en laptops"
+  - "mobile clinic"
+
 buyer_ad_indicators:
   - "gevraagd,"
   - "ik ben op zoek naar"
