@@ -71,6 +71,20 @@ _SPECULATIVE_MARKERS = (
     "unspecified",
     "without specifying",
     "vague",
+    # How the CURRENT prompt words an absence of evidence (2026-11-28 audit).
+    # Measured over the last 30 days of rejections: "no defect stated" is the
+    # single most common wording by a wide margin (85 + 33 + variants), and
+    # not one of the markers above matched it.
+    "no defect stated",
+    "no defects stated",
+    "no defect described",
+    "no defect to the device",
+    "no clear defect",
+    # Deliberately NOT added: "shop advertisement" (~120 of the same 30 days).
+    # That is a positive identification, not a verdict that turned on missing
+    # evidence - a looser prompt will not make a repair shop's ad a buy, and
+    # re-testing them would spend the Haiku budget on the one bucket that
+    # can never flip.
 )
 
 
@@ -91,7 +105,17 @@ def candidates(db_path: str, days: int) -> list[tuple]:
         SELECT listing_id, title, url, reason
         FROM seen_listings
         WHERE matched = 0
-          AND reason LIKE 'AI review:%'
+          -- BOTH prefixes (fixed 2026-11-28 audit). This script shipped
+          -- 08-19, while an AI rejection still read "AI review: <reason>".
+          -- The no-defect gate landed the next afternoon and rejections
+          -- became "AI review (no clear target defect): <reason>", so the
+          -- old pattern stopped matching anything current - measured on the
+          -- live snapshot, --days 14 (the workflow default), 30 and 60 all
+          -- returned ZERO candidates, and only --days 120 found anything at
+          -- all: rows from before the gate, long gone from Marktplaats.
+          -- Three months of "run this after every prompt fix" reported an
+          -- empty backlog that was actually 478 rows in the last 14 days.
+          AND (reason LIKE 'AI review:%' OR reason LIKE 'AI review (%')
           AND first_seen_utc > datetime('now', ?)
         ORDER BY first_seen_utc DESC
         """,
