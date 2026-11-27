@@ -567,3 +567,122 @@ class TestMarketingQuestion:
         assert not filters.is_marketing_question(
             "iphone 16 pro", "iphone 16 pro scherm kapot en gevallen", "scherm kapot"
         )
+
+
+# --- Trade-away foldables (2026-11-28 audit) -------------------------------
+
+# "Iphone 17 pro max - verkoop door aanschaf IPHONE DUO" (2026-10-27) and
+# "iPhone 18 Pro Max 256GB ruilen iphone duo met bij betaling" (live
+# 2026-11-27) are both NON-foldable target phones. The seller names the Duo
+# only to say what they switched to, and is_foldable() rejected them on it -
+# on the two priciest models in scope. Two of the five foldable rejections in
+# all of DB history were this.
+
+class TestTradeAwayFoldableIsNotTheProduct:
+    def test_iphone_17_pro_max_sold_because_the_seller_bought_a_duo(self):
+        result = evaluate(
+            "Iphone 17 pro max - verkoop door aanschaf IPHONE DUO",
+            "Scherm gebarsten, verder perfect.",
+        )
+        assert result.accepted, result.reason
+        assert "foldable" not in result.reason
+
+    def test_iphone_18_pro_max_offered_in_trade_for_a_duo(self):
+        result = evaluate(
+            "iPhone 18 Pro Max 256GB ruilen iphone duo met bij betaling",
+            "Toestel in goede staat, minuscule beschadiging op de behuizing.",
+        )
+        assert "foldable" not in result.reason
+
+    def test_te_ruil_voor_duo_still_reaches_the_damage_gates(self):
+        result = evaluate("iPhone 17 Pro Max te ruil voor iphone duo", "scherm kapot")
+        assert result.accepted, result.reason
+
+    def test_a_duo_named_first_is_still_the_product(self):
+        # The marker has to sit BETWEEN the model and the foldable word.
+        # Sellers name what they are selling first, so this really is a Duo.
+        assert filters.is_foldable("ruilen: iphone duo 256gb blauw tegen iphone 18 pro max")
+
+    def test_a_duo_with_no_trade_marker_is_still_rejected(self):
+        assert filters.is_foldable("gezocht iphone 18 duo white 256gb")
+        assert filters.is_foldable("iphone 18 pro max screen protector duo pack")
+        assert filters.is_foldable("iphone 18 duo 512gb binnenscherm gebarsten")
+
+    def test_trade_marker_before_the_model_does_not_unlock_it(self):
+        # "te ruil: iPhone 18 Duo" - the marker precedes the model, so there
+        # is nothing between model and foldable word, and this is a Duo.
+        assert filters.is_foldable("te ruil: iphone 18 duo 256gb")
+
+
+# --- Negated primary keywords (2026-11-28 audit) ---------------------------
+
+# The primary gate was the last one reading raw text, and it is the only gate
+# that AUTO-ACCEPTS: a seller ruling the damage out got an alert with no AI
+# damage description and no no-defect check. m2470506533 ("De telefoon heeft
+# een onbeschadigd scherm") matched 'beschadigd scherm' live.
+
+class TestNegatedPrimaryKeywordDoesNotAutoAccept:
+    def test_onbeschadigd_scherm_does_not_match_beschadigd_scherm(self):
+        result = evaluate(
+            "iPhone 15 Pro 128GB - titanium gray",
+            "De telefoon heeft een onbeschadigd scherm.",
+        )
+        assert result.reason != "primary keyword matched: 'beschadigd scherm'"
+        assert not result.accepted
+
+    def test_geen_scherm_kapot_does_not_auto_accept(self):
+        result = evaluate(
+            "iPhone 16 Pro 256GB", "Geen scherm kapot, geen krassen, perfect toestel."
+        )
+        assert not result.accepted, result.reason
+
+    def test_nooit_kapot_gehad_does_not_auto_accept(self):
+        # No phrase list can cover "nooit <X> kapot" - the negation word sits
+        # in front of the keyword with a word in between. Downgraded to AI
+        # review rather than rejected: Haiku reads it and decides.
+        result = evaluate(
+            "iPhone 15 128GB", "Nooit scherm kapot gehad, altijd hoesje gebruikt."
+        )
+        assert not result.accepted, result.reason
+        assert result.needs_ai_review
+
+    def test_one_unnegated_mention_keeps_the_auto_accept(self):
+        # "geen waterschade" is a reassurance about something else entirely;
+        # the broken screen beside it is real and must not lose its free pass.
+        result = evaluate("iPhone 17 Pro", "Geen waterschade. Scherm kapot, gevallen.")
+        assert result.accepted, result.reason
+
+    def test_a_distant_geen_does_not_cost_an_ai_call(self):
+        # The window is 16 chars: "geen krassen, wel " is longer, so this
+        # stays an auto-accept instead of paying for a classification.
+        result = evaluate("iPhone 16 Pro", "Geen krassen, wel scherm kapot helaas.")
+        assert result.accepted, result.reason
+
+    def test_negated_keyword_in_the_title_is_the_seller_own_damage(self):
+        # Title-scoped like is_marketing_question: a title stating the damage
+        # is the seller describing their own phone, whatever the body says.
+        assert not filters.is_negated_primary(
+            "iphone 15 scherm kapot", "geen scherm kapot", "scherm kapot"
+        )
+
+    def test_real_damage_beside_a_negation_still_accepts(self):
+        # The 2026-07-13 miss class must stay closed: stripping is surgical,
+        # so damage mentioned next to a reassurance still fires.
+        result = evaluate(
+            "iPhone 16 Pro", "Geen schade aan het scherm, maar de achterkant kapot."
+        )
+        assert result.accepted, result.reason
+        assert "achterkant kapot" in result.reason
+
+    def test_undamaged_screen_plus_damaged_camera_glass_still_reviewed(self):
+        # m2470506533's real defect was the camera lens glass. Losing the
+        # bogus keyword must not lose the listing - it goes to the AI.
+        result = evaluate(
+            "iPhone 15 Pro 128GB - titanium gray",
+            "Onbeschadigd scherm, hoewel het glasplaatje lichte beschadiging vertoont.",
+        )
+        assert result.accepted or result.needs_ai_review, result.reason
+
+    def test_a_plainly_damaged_listing_is_unaffected(self):
+        assert evaluate("iPhone 15", "scherm gebarsten").accepted
+        assert evaluate("iPhone 16 Pro Max 256GB Barst scherm barst achterkant").accepted
