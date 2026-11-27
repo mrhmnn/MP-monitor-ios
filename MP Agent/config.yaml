@@ -79,6 +79,33 @@ search_queries:
   # misses. One broad query: Marktplaats matches on words, so this also
   # surfaces "gaat niet meer aan" phrasings.
   - "iphone gaat niet aan"
+  # Added 2026-11-28 (audit). Marktplaats does no stemming, and Dutch
+  # sellers downplay damage with diminutives - so "iphone barst" never
+  # matches "barstje"/"barstjes", which is how sellers of a cracked screen
+  # actually write it. Five target phones were live and had NEVER been
+  # fetched by any query when this was measured:
+  #   m2470269434  iPhone 15 Pro Max  "hele kleine barstje in scherm"
+  #   m2469968059  iPhone 16 Pro Max  "nette staat alleen een barstje"
+  #   m2469934267  iPhone 15 Pro Max  "klein barstje in het scherm"  (EUR 475)
+  #   m2470023950  iPhone 16 Pro      "onderin barstje op het scherm"
+  #   m2466969336  iPhone 16 Pro      "cameras zijn stuk scherm is stuk"
+  # Downstream classification already handled every one of them (the
+  # ambiguous-term path sends them to Haiku) - the gap was purely the fetch.
+  - "iphone barstje"
+  # "stuk" is the other everyday Dutch word for broken and had no query at
+  # all. Scoped with "scherm": the bare "iphone stuk" query is dominated by
+  # "per stuk" accessory lots (measured: 14 target hits of 30, mostly cases).
+  - "iphone scherm stuk"
+  # Compound forms - no stemming means "schade" never matches "schermschade"
+  # (m2464171459, "iPhone 16 128GB met schermschade en achterkant schade",
+  # 11-10, never fetched).
+  - "iphone schermschade"
+  # "scheur"/"scheurtje" is the second crack word after barst, and
+  # "gebroken" had no query despite "scherm gebroken" being a primary
+  # keyword - the keyword could only ever fire on a listing another query
+  # happened to pull in.
+  - "iphone scheur"
+  - "iphone gebroken"
 
 # HTML search page - FALLBACK ONLY, used when the LRP API call fails.
 # Note: the #Sort fragment is client-side only, so this fallback returns
@@ -369,6 +396,23 @@ negation_phrases:
   - "geen moederbord"     # "geen moederbord schade" / "...problemen"
   - "niet namaak"
   - "geen replica"
+  # Negations of PRIMARY keywords (2026-11-28 audit). filters.py now strips
+  # negations before the primary gate too, and these are what that gate
+  # needs to see: the primary gate is the only one that auto-accepts, so a
+  # phrase it reads backwards costs an alert with no AI damage description
+  # and no no-defect check. Measured live on m2470506533 ("een onbeschadigd
+  # scherm" -> matched 'beschadigd scherm') and on "Geen scherm kapot, geen
+  # krassen" -> matched 'scherm kapot'.
+  # "onbeschadigd" also covers "onbeschadigde" by substring.
+  - "onbeschadigd"
+  - "niet beschadigd"
+  - "geen beschadiging"
+  - "geen scherm kapot"
+  - "niet kapot"
+  - "nooit kapot"
+  - "niets kapot"
+  - "niet gebarsten"
+  - "geen gebarsten"
 
 # --- Noise filters: business/shop listings and "wanted to buy" ads ---
 business_seller_indicators:

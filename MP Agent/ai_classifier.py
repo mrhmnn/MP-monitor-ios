@@ -349,17 +349,23 @@ def classify_ambiguous_listing(
     """
     Ask Haiku what the damage on this listing actually is.
 
-    NOT A GATE (2026-08-20, Milad's call: "i only want the ai review for
-    context in the alerts to specify the damage but alert me either way,
-    don't make the ai review the decider"). main.py alerts on every listing
-    that reaches this function regardless of what comes back; `relevant` is
-    kept only so the reason string can be labelled, and `reason` is the
-    product - it is what gets written into the Telegram alert so he knows
-    what is broken before opening the ad.
+    TWO JOBS, and `reason` is the bigger one: it is what gets written into
+    the Telegram alert, so Milad knows what is broken before opening the ad.
 
-    The real gate is filters.py: target model, hard excludes (iCloud, water,
-    board, counterfeit), bulk lots, buyer ads, business sellers, distance.
-    A listing this function sees has already passed all of that.
+    `relevant` DOES gate (corrected 2026-11-28 - this docstring still
+    described the morning of 2026-08-20, when the verdict was demoted to
+    describe-only; the no-defect gate went back in that same afternoon and
+    the text was never updated, so it has been telling the opposite of the
+    code for three months). main.py alerts only when `relevant` is true,
+    unless `ai_gates_alerts` is set false - see the NO-DEFECT GATE comment
+    there for why. What the verdict may NOT do is reject on repair cost or
+    model year; the prompt forbids both, and treats unspecified damage and
+    "voor onderdelen" as relevant.
+
+    filters.py is the gate in front of it: target model, hard excludes
+    (iCloud, water, board, counterfeit), bulk lots, buyer ads, business
+    sellers, shop ad copy. A listing this function sees has passed all of
+    that; distance is checked after.
 
     Photos are attached ONLY when the caller passes them, and main.py passes
     them only when the listing points at its pictures instead of naming the

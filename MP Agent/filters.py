@@ -277,9 +277,33 @@ _FOLDABLE_RE = re.compile(
 )
 
 
+# The phone a seller is moving TO is not the phone they are selling
+# (2026-11-28 audit). A foldable word that sits AFTER a target generation
+# with a trade/upgrade marker in between belongs to the other half of the
+# deal. Two real rejections this cost, both on the priciest models there are:
+#   "Iphone 17 pro max - verkoop door aanschaf IPHONE DUO"        (10-27)
+#   "iPhone 18 Pro Max 256GB ruilen iphone duo met bij betaling"  (live 11-27)
+# The reverse word order still rejects, which is the whole reason the marker
+# has to sit BETWEEN the two: in "Ruilen: iPhone Duo 256GB tegen iPhone 18
+# Pro Max" the Duo is what's for sale, and sellers name that first.
+_IPHONE_GEN_RE = re.compile(r"\b(?:iphone|iph)\s*1[4-8]\b", re.IGNORECASE)
+_TRADE_MARKER_RE = re.compile(
+    r"ruil|geruild|omruil|tegen|aanschaf|overstap|overgestapt|upgrade"
+    r"|gewisseld|vervangen",
+    re.IGNORECASE,
+)
+
+
 def is_foldable(title: str) -> bool:
     """True if the title sells a foldable iPhone (iPhone Duo / "18 Fold")."""
-    return _FOLDABLE_RE.search(title) is not None
+    match = _FOLDABLE_RE.search(title)
+    if match is None:
+        return False
+    before = title[: match.start()]
+    model_before = _IPHONE_GEN_RE.search(before)
+    if model_before and _TRADE_MARKER_RE.search(before[model_before.end():]):
+        return False
+    return True
 
 
 def is_business_listing(text: str, indicators: list[str], threshold: int) -> bool:
@@ -318,6 +342,40 @@ def is_marketing_question(title: str, text: str, primary_term: str) -> bool:
     if primary_term in title:
         return False
     return re.search(re.escape(primary_term) + r"\s*\?", text) is not None
+
+
+# A negation word sitting immediately in front of the keyword (2026-11-28
+# audit). negation_phrases cannot express this: the list is exact phrases, and
+# sellers put a word in the middle - "Nooit scherm kapot gehad" negates
+# 'scherm kapot' with nothing in the list able to match it. Same shape as
+# is_marketing_question, and the same two guards, for the same reason: this
+# gate is the only one that AUTO-ACCEPTS, so all this does is take away the
+# free pass. The verdict is needs_ai_review, never a rejection - Haiku reads
+# "geen krassen, wel scherm kapot" correctly, and losing a real alert costs
+# far more than one Haiku call.
+_NEGATION_LEAD_RE = re.compile(r"\b(?:geen|niet|niets|nooit|nergens|zonder)\b")
+
+# Short on purpose: "nooit ", "zonder ", "geen enkele " all fit, while
+# "geen krassen, wel " (18 chars) does not - that one is real damage and
+# keeps its auto-accept.
+_NEGATION_LEAD_WINDOW = 16
+
+
+def is_negated_primary(title: str, text: str, primary_term: str) -> bool:
+    """True when every mention of the keyword is preceded by a negation word.
+
+    One un-negated mention is enough to keep the auto-accept: a seller who
+    writes "geen waterschade, scherm kapot" is describing a broken screen.
+    """
+    if primary_term in title:
+        return False
+    found = False
+    for match in re.finditer(re.escape(primary_term), text):
+        found = True
+        window = text[max(0, match.start() - _NEGATION_LEAD_WINDOW): match.start()]
+        if not _NEGATION_LEAD_RE.search(window):
+            return False
+    return found
 
 
 def is_buyer_ad(text: str, indicators: list[str]) -> bool:
@@ -507,20 +565,38 @@ def evaluate_listing(
     # fixed - and the 2026-07-22 lock/corrosion additions made it bite hard.
     # A genuine exclude still fires: "geen schade aan scherm, wel
     # waterschade" keeps 'waterschade' after the negation is stripped.
-    excluded_term = has_hard_exclude(
-        strip_negation_phrases(combined_text, config["negation_phrases"]),
-        config["hard_excludes"],
+    negation_stripped = strip_negation_phrases(
+        combined_text, config["negation_phrases"]
     )
+    excluded_term = has_hard_exclude(negation_stripped, config["hard_excludes"])
     if excluded_term:
         return FilterResult(accepted=False, reason=f"hard exclude matched: '{excluded_term}'")
 
-    primary_term = has_primary_match(combined_text, config["primary_keywords"])
+    # Negation-stripped here too (2026-11-28 audit). The primary gate was the
+    # last one still reading raw text, and it is the only gate that AUTO-
+    # ACCEPTS - so a seller ruling the damage out got an alert with no AI
+    # description attached and the no-defect gate never ran. Measured live:
+    # "De telefoon heeft een onbeschadigd scherm" matched 'beschadigd scherm'
+    # (m2470506533), and "Geen scherm kapot, geen krassen" matched
+    # 'scherm kapot'. Surgical, not global: only the negated phrase is
+    # removed, so "geen schade aan scherm, achterkant kapot" still accepts on
+    # 'achterkant kapot' - the 2026-07-13 miss class stays closed.
+    primary_term = has_primary_match(negation_stripped, config["primary_keywords"])
     if primary_term:
         vague_signal = _contains_any(title_lower, config.get("vague_title_signals", []))
         if vague_signal:
             return FilterResult(
                 accepted=False,
                 reason=f"vague title ('{vague_signal}') - needs AI confirmation despite keyword match",
+                needs_ai_review=True,
+            )
+        if is_negated_primary(title_lower, negation_stripped, primary_term):
+            return FilterResult(
+                accepted=False,
+                reason=(
+                    f"'{primary_term}' is negated in the description "
+                    "(keyword only there, behind a 'geen/niet/nooit') - AI decides"
+                ),
                 needs_ai_review=True,
             )
         if is_marketing_question(title_lower, combined_text, primary_term):
@@ -554,7 +630,7 @@ def evaluate_listing(
     # real damage and must still reach the AI (same miss class as the
     # ambiguous-term path). Config-gated in case call volume needs reining in.
     if config.get("ai_review_unmatched", True):
-        remaining = strip_negation_phrases(combined_text, config["negation_phrases"])
+        remaining = negation_stripped
         no_negation = remaining == combined_text
         if no_negation or _contains_any(remaining, damage_detect.DAMAGE):
             return FilterResult(
